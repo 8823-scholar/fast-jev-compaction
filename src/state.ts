@@ -12,7 +12,7 @@ export const STATE_CONTEXT =
   'A coding assistant conversation is being compacted to free context. `history` is the whole conversation so far, oldest first; tool outputs are replaced by a short `result` note and long texts may be abridged. Each question asks whether one tool call, or the full output of that call, still needs to stay in the history verbatim. Whatever is not kept is deleted permanently, but the assistant can always re-run a tool or re-read a file.';
 
 /** Successive caps on the serialised tool input included per call. */
-const INPUT_CHARS = [1000, 200, 60] as const;
+export const INPUT_CHARS = [1000, 200, 60] as const;
 const TEXT_HEAD = 400;
 const TEXT_TAIL = 150;
 
@@ -20,10 +20,11 @@ const TOKEN_PIECES = /[A-Za-z]+|\d+|[^\sA-Za-z\d]/g;
 
 /**
  * Estimates tokens without a tokenizer: a word costs one token per six
- * letters, a digit half a token, any other symbol nine tenths. Calibrated
- * against the usage Jev reports for real transcripts, where it lands 2–18%
- * above the true count; a plain characters-per-token ratio undercounts the
- * JSON-heavy states by up to 40%.
+ * letters, a digit half a token, any other symbol nine tenths. Against the
+ * usage Jev reports for real transcripts it lands between 9% below and 18%
+ * above the true count, so ceilings need that much headroom under Jev's own
+ * limits; a plain characters-per-token ratio undercounts the JSON-heavy
+ * states by up to 40%.
  */
 export function estimateTokens(text: string): number {
   let tokens = 0;
@@ -41,7 +42,7 @@ export function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1))}…`;
 }
 
-function abridge(text: string, head: number, tail: number): string {
+export function abridge(text: string, head: number, tail: number): string {
   if (text.length <= head + tail + 40) return text;
   const omitted = text.length - head - tail;
   return `${text.slice(0, head)}\n[… ${omitted} chars omitted …]\n${text.slice(-tail)}`;
@@ -148,7 +149,7 @@ function callsByMessage(calls: readonly ToolCall[]): Map<number, ToolCall[]> {
   return byMessage;
 }
 
-function historyEntries(
+export function historyEntries(
   messages: readonly Message[],
   calls: readonly ToolCall[],
   inputChars: number,

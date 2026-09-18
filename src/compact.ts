@@ -1,17 +1,26 @@
 import { noulAnswer } from './request.js';
 import { collectToolCalls, estimateTokens, fitState } from './state.js';
+import {
+  NOTES_CONTEXT,
+  batchNotes,
+  noteCandidates,
+  noteQuestion,
+  windowStates,
+} from './windows.js';
 import type {
   CallAnswer,
   CallDecision,
   CompactOptions,
   CompactResult,
   CompactionState,
+  FittedState,
   JevAsker,
   JevQuestions,
   Message,
   ResolvedCompactOptions,
   ToolCall,
   ToolUse,
+  UserNote,
 } from './types.js';
 
 export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
@@ -21,10 +30,20 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   maxStateTokens: 25_000,
   maxRequestTokens: 30_000,
   truncateHeadChars: 300,
+  windowTokens: 8_000,
 };
 
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
 const REQUEST_OVERHEAD_TOKENS = 20;
+
+/** Requests in flight at once when a conversation is judged in windows. */
+const WINDOW_CONCURRENCY = 8;
+
+/**
+ * The `fitState` stages that still show the texts around each call. The later
+ * stages delete them, and with them the reason a call may have to stay.
+ */
+const KEEPS_TEXTS = /^(full|inputs<=\d+|texts abridged)$/;
 
 function finite(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -48,6 +67,10 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
     truncateHeadChars: Math.max(
       0,
       Math.floor(finite(options.truncateHeadChars, DEFAULT_OPTIONS.truncateHeadChars)),
+    ),
+    windowTokens: Math.max(
+      0,
+      Math.floor(finite(options.windowTokens, DEFAULT_OPTIONS.windowTokens)),
     ),
   };
 }
@@ -130,6 +153,62 @@ async function askBatch(
       },
     ]),
   );
+}
+
+async function mapPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await run(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/**
+ * Asks Jev which of the user's messages say that something has to be kept or
+ * will be needed again; those travel with every window.
+ */
+async function askNotes(
+  asker: JevAsker,
+  messages: readonly Message[],
+  options: ResolvedCompactOptions,
+): Promise<{ notes: UserNote[]; requests: number }> {
+  const batches = batchNotes(noteCandidates(messages), options);
+  const picked = await mapPool(batches, WINDOW_CONCURRENCY, async (batch) => {
+    const questions: JevQuestions = Object.assign({}, ...batch.map(noteQuestion));
+    const { answers } = await asker.ask({ context: NOTES_CONTEXT, messages: batch }, questions);
+    return batch.filter(
+      (note) => noulAnswer(answers, `note_m${note.i}`) >= options.keepThreshold,
+    );
+  });
+  return { notes: picked.flat(), requests: batches.length };
+}
+
+/**
+ * The single state of the whole conversation, when it fits without deleting
+ * the texts around the calls; `undefined` when it has to be judged in windows.
+ */
+function singleState(
+  messages: readonly Message[],
+  calls: readonly ToolCall[],
+  options: ResolvedCompactOptions,
+): FittedState | undefined {
+  if (options.windowTokens === 0) return fitState(messages, calls, options);
+  try {
+    const fitted = fitState(messages, calls, options);
+    return KEEPS_TEXTS.test(fitted.stage) ? fitted : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function truncatedResultText(text: string, isError: boolean, headChars: number): string {
@@ -251,8 +330,10 @@ function count(decisions: readonly CallDecision[], reason: CallDecision['reason'
  * Compacts a transcript by asking Jev, for every tool call outside the pinned
  * first and newest messages, whether the call and whether its result must
  * stay. The whole history (results omitted, fitted into `maxStateTokens`) is
- * sent as state with every batch of questions. Throws when Jev fails or the
- * history cannot be fitted; the caller decides whether to fall back.
+ * sent as state with every batch of questions; a history that would only fit
+ * with its texts deleted is judged in windows instead, each on its own state.
+ * Throws when Jev fails or the history cannot be fitted; the caller decides
+ * whether to fall back.
  */
 export async function compact(
   messages: readonly Message[],
@@ -266,15 +347,34 @@ export async function compact(
   const charsBefore = messages.reduce((sum, message) => sum + messageChars(message), 0);
 
   let fitted: { tokens: number; stage: string } = { tokens: 0, stage: '' };
-  let batches: ToolCall[][] = [];
+  let requests = 0;
   const answers = new Map<string, CallAnswer>();
   if (candidates.length > 0) {
-    const state = fitState(messages, calls, resolved);
-    fitted = state;
-    batches = batchCalls(candidates, state.tokens, resolved);
-    const answered = await Promise.all(
-      batches.map((batch) => askBatch(asker, state.state, batch)),
-    );
+    const single = singleState(messages, calls, resolved);
+    let answered: Map<string, CallAnswer>[];
+    if (single) {
+      fitted = single;
+      const batches = batchCalls(candidates, single.tokens, resolved);
+      requests = batches.length;
+      answered = await Promise.all(batches.map((batch) => askBatch(asker, single.state, batch)));
+    } else {
+      const { notes, requests: noteRequests } = await askNotes(asker, messages, resolved);
+      const windows = windowStates(messages, calls, notes, resolved);
+      const jobs = windows.flatMap((window) =>
+        batchCalls(window.calls, window.tokens, resolved).map((batch) => ({
+          state: window.state,
+          batch,
+        })),
+      );
+      fitted = {
+        tokens: Math.max(0, ...windows.map((window) => window.tokens)),
+        stage: `windowed x${windows.length}`,
+      };
+      requests = noteRequests + jobs.length;
+      answered = await mapPool(jobs, WINDOW_CONCURRENCY, (job) =>
+        askBatch(asker, job.state, job.batch),
+      );
+    }
     for (const map of answered) for (const [id, answer] of map) answers.set(id, answer);
   }
 
@@ -302,7 +402,7 @@ export async function compact(
       pinned: count(decisions, 'pinned'),
       stateTokens: fitted.tokens,
       stateStage: fitted.stage,
-      requests: batches.length,
+      requests,
       ms: Date.now() - started,
     },
   };

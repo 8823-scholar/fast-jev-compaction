@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyDecisions,
   batchCalls,
+  batchNotes,
   buildJevRequest,
   collectToolCalls,
   compact,
@@ -10,14 +11,17 @@ import {
   estimateTokens,
   fitState,
   JevClient,
+  noteCandidates,
   parseJevResponse,
   reductionRatio,
   resolveOptions,
+  windowStates,
   type HistoryToolCall,
   type JevAsker,
   type JevQuestions,
   type Message,
   type ToolCall,
+  type WindowState,
 } from '../src/index.js';
 
 function message(role: Message['role'], text: string, extra: Partial<Message> = {}): Message {
@@ -79,15 +83,18 @@ describe('options', () => {
       maxStateTokens: 25_000,
       maxRequestTokens: 30_000,
       truncateHeadChars: 300,
+      windowTokens: 8_000,
     });
     expect(resolveOptions({
       keepThreshold: Number.NaN,
       preserveRecentMessages: 2.7,
       truncateHeadChars: -1.2,
+      windowTokens: -5,
     })).toMatchObject({
       keepThreshold: 0.5,
       preserveRecentMessages: 2,
       truncateHeadChars: 0,
+      windowTokens: 0,
     });
   });
 });
@@ -386,6 +393,168 @@ describe('compact', () => {
     await expect(compact(transcript(), broken, { preserveRecentMessages: 1 })).rejects.toThrow(
       /Invalid Jev answer/,
     );
+  });
+});
+
+/** `rounds` of explanation, read and result between a first prompt and a closing exchange. */
+function longTranscript(rounds: number, notes: Record<number, string> = {}): Message[] {
+  const messages: Message[] = [message('user', 'Refactor the billing module.')];
+  for (let round = 0; round < rounds; round += 1) {
+    if (notes[round]) messages.push(message('user', notes[round]!));
+    messages.push(message('assistant', `Round ${round}: ${'looking at the next file. '.repeat(8)}`));
+    messages.push(call(`tool-${round}`, 'Read', { file_path: `src/file${round}.ts` }, 'x'));
+    messages.push(result(`tool-${round}`, 'x'.repeat(2000)));
+  }
+  messages.push(message('assistant', 'All files reviewed.'), message('user', 'continue'));
+  return messages;
+}
+
+const windowed = {
+  maxStateTokens: 1500,
+  preserveRecentMessages: 2,
+  goal: 'refactor billing',
+  windowTokens: 400,
+};
+
+describe('windows', () => {
+  it('asks about every candidate call in exactly one window and shows the texts around it', () => {
+    const messages = longTranscript(30);
+    const calls = collectToolCalls(messages, windowed.preserveRecentMessages);
+    const windows = windowStates(messages, calls, [], windowed);
+    expect(windows.length).toBeGreaterThan(3);
+    const asked = windows.flatMap((window) => window.calls.map((c) => c.id));
+    expect([...asked].sort()).toEqual(calls.filter((c) => !c.pinned).map((c) => c.id).sort());
+    expect(new Set(asked).size).toBe(asked.length);
+    for (const window of windows) {
+      expect(window.tokens).toBeLessThanOrEqual(windowed.maxStateTokens);
+      expect(window.state.window.of).toBe(messages.length);
+      const shown = window.state.history.map((entry) => entry.i);
+      for (const c of window.calls) expect(shown).toContain(c.callIndex);
+      expect(window.state.history.some((entry) => entry.text.startsWith('Round '))).toBe(true);
+      expect(shown.every((i) => i < messages.length - windowed.preserveRecentMessages)).toBe(true);
+    }
+  });
+
+  it('adds neighbouring messages around a window without asking about their calls', () => {
+    const messages = longTranscript(30);
+    const calls = collectToolCalls(messages, windowed.preserveRecentMessages);
+    const second = windowStates(messages, calls, [], windowed)[1]!;
+    const shown = second.state.history.map((entry) => entry.i);
+    expect(Math.min(...shown)).toBeLessThan(second.state.window.from);
+    expect(Math.max(...shown)).toBeGreaterThan(second.state.window.to);
+    const askedIndices = second.calls.map((c) => c.callIndex);
+    expect(Math.min(...askedIndices)).toBeGreaterThanOrEqual(second.state.window.from);
+    expect(Math.max(...askedIndices)).toBeLessThanOrEqual(second.state.window.to);
+  });
+
+  it('carries the notes from outside the shown history into each window', () => {
+    const messages = longTranscript(30, { 20: 'Keep the contents of file3.ts, I will need them.' });
+    const noteIndex = messages.findIndex((m) => m.text.startsWith('Keep the contents'));
+    const calls = collectToolCalls(messages, windowed.preserveRecentMessages);
+    const note = { i: noteIndex, text: messages[noteIndex]!.text };
+    const windows = windowStates(messages, calls, [note], windowed);
+    const first = windows[0]!;
+    expect(first.state.user_notes).toEqual([note]);
+    const around = windows.find((w) => w.state.history.some((entry) => entry.i === noteIndex))!;
+    expect(around.state.user_notes).toEqual([]);
+  });
+
+  it('skips windows without a candidate call', () => {
+    const messages = [
+      message('user', 'start'),
+      ...Array.from({ length: 40 }, (_, n) => message('assistant', `thinking ${n} `.repeat(30))),
+      call('tool-1', 'Read', { file_path: 'a.ts' }, 'x'),
+      result('tool-1', 'x'.repeat(500)),
+      message('assistant', 'done'),
+      message('user', 'ok'),
+    ];
+    const calls = collectToolCalls(messages, 1);
+    const windows = windowStates(messages, calls, [], { ...windowed, preserveRecentMessages: 1 });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]!.calls.map((c) => c.tool_use_id)).toEqual(['tool-1']);
+  });
+
+  it('throws when a single window cannot be fitted', () => {
+    const messages = longTranscript(3);
+    const calls = collectToolCalls(messages, 1);
+    expect(() =>
+      windowStates(messages, calls, [], { ...windowed, preserveRecentMessages: 1, maxStateTokens: 100 }),
+    ).toThrow(/too large for Jev/);
+  });
+});
+
+describe('user notes', () => {
+  it('takes only what the user typed, abridged', () => {
+    const messages = [
+      message('user', 'a'.repeat(2000)),
+      call('tool-1', 'Read', { file_path: 'a.ts' }, 'x'),
+      result('tool-1', 'file contents'),
+      message('assistant', 'not a note'),
+      message('user', '  '),
+      message('user', 'keep that'),
+    ];
+    const candidates = noteCandidates(messages);
+    expect(candidates.map((c) => c.i)).toEqual([0, 5]);
+    expect(candidates[0]!.text).toContain('chars omitted');
+    expect(candidates[1]!.text).toBe('keep that');
+  });
+
+  it('splits the candidates so that each batch fits a request', () => {
+    const candidates = Array.from({ length: 40 }, (_, i) => ({ i, text: 'word '.repeat(60) }));
+    const one = batchNotes(candidates, { maxStateTokens: 25_000, maxRequestTokens: 30_000 });
+    expect(one).toHaveLength(1);
+    const many = batchNotes(candidates, { maxStateTokens: 1_000, maxRequestTokens: 30_000 });
+    expect(many.length).toBeGreaterThan(1);
+    expect(many.flat()).toEqual(candidates);
+  });
+});
+
+describe('compact in windows', () => {
+  const options = { ...windowed, maxRequestTokens: 2_000 };
+
+  it('selects the user notes first, then judges every window on its own state', async () => {
+    const messages = longTranscript(30, { 20: 'Keep the contents of file3.ts, I will need them.' });
+    const noteIndex = messages.findIndex((m) => m.text.startsWith('Keep the contents'));
+    const seen: Seen[] = [];
+    const output = await compact(
+      messages,
+      fakeJev((name) => (name === `note_m${noteIndex}` || name === 'result_t4' ? 0.9 : 0.1), seen),
+      options,
+    );
+    const noteRequests = seen.filter((s) => 'messages' in (s.state as object));
+    const windowRequests = seen.filter((s) => 'window' in (s.state as object));
+    expect(noteRequests.length).toBeGreaterThan(0);
+    expect(seen.indexOf(noteRequests[noteRequests.length - 1]!)).toBeLessThan(
+      seen.indexOf(windowRequests[0]!),
+    );
+    expect(windowRequests.length).toBeGreaterThan(3);
+    const first = windowRequests[0]!.state as WindowState;
+    expect(first.user_notes.map((note) => note.i)).toEqual([noteIndex]);
+    const questions = windowRequests.flatMap((s) => s.questions);
+    expect(new Set(questions).size).toBe(questions.length);
+    expect(output.stats.stateStage).toBe(`windowed x${windowRequests.length}`);
+    expect(output.stats.requests).toBe(seen.length);
+    expect(output.stats.kept).toBe(1);
+    expect(output.decisions.find((d) => d.id === 't4')!.action).toBe('keep');
+  });
+
+  it('keeps the single state when it still shows the texts', async () => {
+    const seen: Seen[] = [];
+    await compact(transcript(), fakeJev(() => 0.1, seen), { preserveRecentMessages: 1 });
+    expect(seen).toHaveLength(1);
+    expect('window' in (seen[0]!.state as object)).toBe(false);
+  });
+
+  it('never splits with windowTokens 0', async () => {
+    const seen: Seen[] = [];
+    const output = await compact(longTranscript(30), fakeJev(() => 0.1, seen), {
+      ...options,
+      maxStateTokens: 2_500,
+      maxRequestTokens: 4_000,
+      windowTokens: 0,
+    });
+    expect(seen.every((s) => !('window' in (s.state as object)))).toBe(true);
+    expect(output.stats.stateStage).not.toMatch(/^windowed/);
   });
 });
 

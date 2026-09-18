@@ -34,15 +34,19 @@ built-in compaction summary with the original messages.
    (`t12 Read file_path=src/a.ts → ok 480ch`); old call-less messages left
    out; runs of old call-only messages folded into one entry. If it still
    does not fit, compaction throws. Tokens are estimated without a tokenizer (a
-   word per six letters, half a token per digit, ~one per other symbol),
-   calibrated to land a little above the counts Jev reports.
+   word per six letters, half a token per digit, ~one per other symbol).
+   The stages from collapsing old messages onwards delete the texts that say
+   why a call matters, so they are only used with `windowTokens: 0`; otherwise
+   a history that needs them is judged in windows (step 8).
 4. For every non-pinned call Jev gets two `noul` questions: should the **call**
    stay (knowing it was made, with its input, still matters), and should the
    **result** stay verbatim (its contents are still needed and re-running the
    tool would not do).
 5. Questions are split into as many requests as needed so state plus questions
-   stays under `maxRequestTokens` (30k by default, under Jev's 32k request
-   limit). The same full state is resent with every request; requests run
+   stays under `maxRequestTokens` (30k by default). Jev itself accepts 32k
+   tokens of state plus the longest question and 64k per request, and the
+   estimate can run 9% under the real count, so about 29k / 58k are the
+   highest safe settings. The same full state is resent with every request; requests run
    concurrently and their answers are merged.
 6. Decisions per call, against `keepThreshold`:
    - `keepResult ≥ threshold` → keep call and result;
@@ -52,6 +56,18 @@ built-in compaction summary with the original messages.
 7. The message list is rebuilt: a message that loses all its content is
    removed, untouched messages are returned as the same objects, and no result
    is ever left without its call.
+
+8. **Windows.** A long history is cut into windows of about `windowTokens` of
+   history each. Every window gets its own state: its messages with the texts
+   kept readable (tool inputs up to 1000 characters, texts up to 1600), a
+   quarter window of neighbouring messages on each side for context, the
+   goal, and `user_notes`. The notes come from one extra pass that shows Jev
+   everything the user typed and asks, per message, whether it tells the
+   assistant to keep something or says something will be needed again; the
+   messages at or above `keepThreshold` travel with every window that does
+   not already show them. Each call is asked about in exactly one window,
+   windows without a candidate call are skipped, and up to eight requests run
+   at once. A 1200-message session is about 25 windows and a few seconds.
 
 Jev failures, malformed answers, a missing key, or a history that cannot be
 fitted throw; the caller (or the Claude Code hook) decides what to fall back to.
@@ -134,6 +150,7 @@ const result = await compactMessages(transcript, {
 | `maxStateTokens` | `25000` | Estimated token ceiling for the state |
 | `maxRequestTokens` | `30000` | Estimated ceiling for state plus one batch of questions |
 | `truncateHeadChars` | `300` | Characters of a dropped tool result retained before its note |
+| `windowTokens` | `8000` | History per window when a long conversation is judged in windows; `0` never splits |
 
 `result.stats` reports message and character counts before and after, the
 per-reason decision counts, the state size in estimated tokens, which fitting
@@ -148,6 +165,9 @@ stage was needed, and the number of requests.
   result is safe to delete. The assistant can always re-run the tool.
 - The full state is repeated with every request, so a history near the state
   ceiling costs one request per handful of questions.
+- A window only shows its own part of the conversation. A reason to keep a
+  call that the user states elsewhere reaches it through `user_notes`; a
+  reason that only the assistant states elsewhere does not.
 
 ## Claude Code plugin
 

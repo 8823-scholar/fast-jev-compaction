@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
@@ -78,6 +78,12 @@
       "title": "Truncated tool result head",
       "description": "Characters of a tool result kept when Jev decides its full output is no longer needed; 0 keeps only the note.",
       "default": 300
+    },
+    "windowTokens": {
+      "type": "number",
+      "title": "Window size",
+      "description": "Estimated tokens of history per window when a long conversation is judged in windows; 0 never splits and shrinks the single state instead.",
+      "default": 8000
     },
     "model": {
       "type": "string",

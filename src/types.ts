@@ -85,6 +85,31 @@ export interface CompactionState {
   history: HistoryEntry[];
 }
 
+/** Something the user said about what has to be kept or will be needed again. */
+export interface UserNote {
+  /** Index of the user message. */
+  i: number;
+  text: string;
+}
+
+/**
+ * The state of one window of a conversation too long to show at once: the
+ * window's own history plus the user's notes from the rest of the conversation.
+ */
+export interface WindowState extends CompactionState {
+  /** Message indices the questions are about, and the conversation length. */
+  window: { from: number; to: number; of: number };
+  /** Notes from outside the shown history, oldest first. */
+  user_notes: UserNote[];
+}
+
+export interface FittedWindow {
+  state: WindowState;
+  tokens: number;
+  /** The candidate calls this window's questions are about. */
+  calls: ToolCall[];
+}
+
 export interface FittedState {
   state: CompactionState;
   tokens: number;
@@ -105,6 +130,11 @@ export interface CompactOptions {
   maxRequestTokens?: number;
   /** Characters of a dropped tool result to retain. Default 300. */
   truncateHeadChars?: number;
+  /**
+   * Estimated tokens of history per window when the conversation is judged in
+   * windows; 0 never splits and shrinks the single state instead. Default 8000.
+   */
+  windowTokens?: number;
 }
 
 export interface ResolvedCompactOptions {
@@ -114,6 +144,7 @@ export interface ResolvedCompactOptions {
   maxStateTokens: number;
   maxRequestTokens: number;
   truncateHeadChars: number;
+  windowTokens: number;
 }
 
 export interface CompactResult {
@@ -131,7 +162,7 @@ export interface CompactResult {
     callsDropped: number;
     pinned: number;
     stateTokens: number;
-    /** Which fitting stage the state needed, '' when no request was made. */
+    /** Which fitting stage the state needed (`windowed xN` when split), '' when no request was made. */
     stateStage: string;
     requests: number;
     ms: number;
