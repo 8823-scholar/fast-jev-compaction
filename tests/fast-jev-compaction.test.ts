@@ -460,6 +460,31 @@ describe('HTTP client', () => {
       model: 'jev-1.13.0',
       answers: { q: { type: 'noul', noul: 0.4 } },
     });
+
+    // The shape Cloudflare's /ai/run actually returns for typesafe/jev.
+    const nested = JSON.stringify({
+      result: {
+        state: 'Completed',
+        result: {
+          model: 'jev-1.13.0',
+          answers: { is_bug: { type: 'noul', noul: 0.97 } },
+          usage: { input_tokens: 342, output_tokens: 52 },
+        },
+        gatewayMetadata: { keySource: 'Unified' },
+      },
+      success: true,
+      errors: [],
+      messages: [],
+    });
+    expect(parseJevResponse(200, true, nested)).toEqual({
+      model: 'jev-1.13.0',
+      answers: { is_bug: { type: 'noul', noul: 0.97 } },
+      usage: { input_tokens: 342, output_tokens: 52 },
+    });
+
+    expect(() =>
+      parseJevResponse(200, true, '{"result":{"result":{"result":{"answers":{}}}}}'),
+    ).toThrow(/missing answers/);
   });
 
   it('reads Cloudflare credentials from the environment', async () => {

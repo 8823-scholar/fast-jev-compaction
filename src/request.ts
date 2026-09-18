@@ -88,10 +88,18 @@ function hasAnswers(value: unknown): value is JevResponse {
 }
 
 /**
- * Validates a Jev response body; throws on anything but an `answers` object.
- * The Cloudflare REST API may wrap the model output as `{ result, success }`;
- * that envelope is unwrapped.
+ * The `answers` object inside a response, looking through `result` envelopes.
+ * Cloudflare's `/ai/run` returns `{ result: { state, result: <model output> } }`.
  */
+function unwrapAnswers(value: unknown, depth = 0): JevResponse | undefined {
+  if (hasAnswers(value)) return value;
+  if (depth < 2 && value !== null && typeof value === 'object' && 'result' in value) {
+    return unwrapAnswers(value.result, depth + 1);
+  }
+  return undefined;
+}
+
+/** Validates a Jev response body; throws on anything but an `answers` object. */
 export function parseJevResponse(
   status: number,
   ok: boolean,
@@ -106,16 +114,9 @@ export function parseJevResponse(
   } catch {
     throw new Error('Jev returned malformed JSON');
   }
-  if (hasAnswers(parsed)) return parsed;
-  if (
-    parsed !== null &&
-    typeof parsed === 'object' &&
-    'result' in parsed &&
-    hasAnswers(parsed.result)
-  ) {
-    return parsed.result;
-  }
-  throw new Error('Jev response is missing answers');
+  const response = unwrapAnswers(parsed);
+  if (!response) throw new Error('Jev response is missing answers');
+  return response;
 }
 
 /** The `noul` probability of one answer; throws when it is not there. */
