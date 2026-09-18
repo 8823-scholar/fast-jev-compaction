@@ -55,10 +55,14 @@ export type HookConfig = CompactOptions & {
   provider: JevProvider;
   baseUrl?: string;
   cloudflareAccountId?: string;
+  cloudflareGatewayId?: string;
 };
 
 /** The transport half of the config: what `buildJevRequest` needs beyond the key. */
-export type JevEndpoint = Pick<HookConfig, 'provider' | 'model' | 'baseUrl' | 'cloudflareAccountId'>;
+export type JevEndpoint = Pick<
+  HookConfig,
+  'provider' | 'model' | 'baseUrl' | 'cloudflareAccountId' | 'cloudflareGatewayId'
+>;
 
 function optionProvider(options: PluginOptions): JevProvider {
   const value = optionString(options, 'provider');
@@ -101,7 +105,7 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     model: optionString(options, 'model') ?? HOOK_DEFAULTS.model,
     provider: optionProvider(options),
   };
-  for (const key of ['apiKey', 'goal', 'baseUrl', 'cloudflareAccountId'] as const) {
+  for (const key of ['apiKey', 'goal', 'baseUrl', 'cloudflareAccountId', 'cloudflareGatewayId'] as const) {
     const value = optionString(options, key);
     if (value) config[key] = value;
   }
@@ -250,7 +254,11 @@ type HookEnv = {
   settings: { read: () => Promise<Readonly<Record<string, unknown>>> };
 };
 
-type CredentialVariable = 'TYPESAFE_API_KEY' | 'CLOUDFLARE_API_TOKEN' | 'CLOUDFLARE_ACCOUNT_ID';
+type CredentialVariable =
+  | 'TYPESAFE_API_KEY'
+  | 'CLOUDFLARE_API_TOKEN'
+  | 'CLOUDFLARE_ACCOUNT_ID'
+  | 'CLOUDFLARE_AI_GATEWAY_ID';
 
 /** `$.env.get` requires a literal name, so each variable has its own call. */
 function processVariable($: HookEnv, name: CredentialVariable): Promise<string | undefined> {
@@ -261,6 +269,8 @@ function processVariable($: HookEnv, name: CredentialVariable): Promise<string |
       return $.env.get('CLOUDFLARE_API_TOKEN');
     case 'CLOUDFLARE_ACCOUNT_ID':
       return $.env.get('CLOUDFLARE_ACCOUNT_ID');
+    case 'CLOUDFLARE_AI_GATEWAY_ID':
+      return $.env.get('CLOUDFLARE_AI_GATEWAY_ID');
   }
 }
 
@@ -286,8 +296,13 @@ export async function resolveCredentials($: HookEnv, config: HookConfig): Promis
       config.provider === 'cloudflare' ? 'CLOUDFLARE_API_TOKEN' : 'TYPESAFE_API_KEY',
     );
   }
-  if (config.provider === 'cloudflare' && !resolved.cloudflareAccountId && !resolved.baseUrl) {
-    resolved.cloudflareAccountId = await getVariable($, 'CLOUDFLARE_ACCOUNT_ID');
+  if (config.provider === 'cloudflare') {
+    if (!resolved.cloudflareAccountId && !resolved.baseUrl) {
+      resolved.cloudflareAccountId = await getVariable($, 'CLOUDFLARE_ACCOUNT_ID');
+    }
+    if (!resolved.cloudflareGatewayId) {
+      resolved.cloudflareGatewayId = await getVariable($, 'CLOUDFLARE_AI_GATEWAY_ID');
+    }
   }
   return resolved;
 }

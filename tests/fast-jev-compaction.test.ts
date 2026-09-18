@@ -412,7 +412,19 @@ describe('HTTP client', () => {
     );
     expect(request.url).toBe('https://api.cloudflare.com/client/v4/accounts/acc/ai/run/typesafe/jev');
     expect(request.headers.authorization).toBe('Bearer cf');
+    expect(request.headers).not.toHaveProperty('cf-aig-gateway-id');
     expect(JSON.parse(request.body)).toEqual({ state: 'state', questions });
+
+    const viaGateway = buildJevRequest(
+      { apiKey: 'cf', provider: 'cloudflare', cloudflareAccountId: 'acc', cloudflareGatewayId: 'gw' },
+      'state',
+      questions,
+    );
+    expect(viaGateway.url).toBe(request.url);
+    expect(viaGateway.headers['cf-aig-gateway-id']).toBe('gw');
+    expect(
+      buildJevRequest({ apiKey: 'k', cloudflareGatewayId: 'gw' }, 'state', questions).headers,
+    ).not.toHaveProperty('cf-aig-gateway-id');
 
     const gateway = buildJevRequest(
       { apiKey: 'cf', provider: 'cloudflare', baseUrl: 'https://gw.example/workers-ai/typesafe/jev' },

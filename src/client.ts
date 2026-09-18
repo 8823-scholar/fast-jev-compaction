@@ -17,6 +17,8 @@ export interface JevClientOptions {
   baseUrl?: string;
   /** Defaults to `CLOUDFLARE_ACCOUNT_ID`; only used by the cloudflare provider. */
   cloudflareAccountId?: string;
+  /** Defaults to `CLOUDFLARE_AI_GATEWAY_ID`; routes cloudflare requests through that AI Gateway. */
+  cloudflareGatewayId?: string;
   /** Defaults to the global `fetch`. */
   fetch?: typeof fetch;
 }
@@ -28,6 +30,7 @@ export class JevClient implements JevAsker {
   private readonly model: string | undefined;
   private readonly baseUrl: string | undefined;
   private readonly cloudflareAccountId: string | undefined;
+  private readonly cloudflareGatewayId: string | undefined;
   private readonly fetcher: typeof fetch;
 
   constructor(options: JevClientOptions = {}) {
@@ -38,6 +41,9 @@ export class JevClient implements JevAsker {
     this.cloudflareAccountId =
       options.cloudflareAccountId ??
       (this.provider === 'cloudflare' ? process.env.CLOUDFLARE_ACCOUNT_ID : undefined);
+    this.cloudflareGatewayId =
+      options.cloudflareGatewayId ??
+      (this.provider === 'cloudflare' ? process.env.CLOUDFLARE_AI_GATEWAY_ID : undefined);
     this.fetcher = options.fetch ?? fetch;
   }
 
@@ -50,6 +56,7 @@ export class JevClient implements JevAsker {
         model: this.model,
         baseUrl: this.baseUrl,
         cloudflareAccountId: this.cloudflareAccountId,
+        cloudflareGatewayId: this.cloudflareGatewayId,
       },
       state,
       questions,

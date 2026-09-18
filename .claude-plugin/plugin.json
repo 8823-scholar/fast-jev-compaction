@@ -21,6 +21,11 @@
       "title": "Cloudflare account id",
       "description": "Account id for the cloudflare provider. Leave unset to use CLOUDFLARE_ACCOUNT_ID."
     },
+    "cloudflareGatewayId": {
+      "type": "string",
+      "title": "Cloudflare AI Gateway id",
+      "description": "Routes cloudflare requests through this AI Gateway for logs and analytics. Leave unset to use CLOUDFLARE_AI_GATEWAY_ID, or empty for no gateway."
+    },
     "baseUrl": {
       "type": "string",
       "title": "Endpoint override",

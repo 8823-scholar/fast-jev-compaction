@@ -25,6 +25,8 @@ export interface JevRequestParams {
   baseUrl?: string;
   /** Required for `cloudflare` unless `baseUrl` is set. */
   cloudflareAccountId?: string;
+  /** Routes `cloudflare` requests through this AI Gateway (`cf-aig-gateway-id`). */
+  cloudflareGatewayId?: string;
 }
 
 export interface JevRequest {
@@ -55,17 +57,21 @@ export function buildJevRequest(
   state: JevState,
   questions: JevQuestions,
 ): JevRequest {
-  const body =
-    params.provider === 'cloudflare'
-      ? { state, questions }
-      : { model: params.model ?? DEFAULT_MODEL, state, questions };
+  const cloudflare = params.provider === 'cloudflare';
+  const body = cloudflare
+    ? { state, questions }
+    : { model: params.model ?? DEFAULT_MODEL, state, questions };
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${params.apiKey}`,
+    'content-type': 'application/json',
+  };
+  if (cloudflare && params.cloudflareGatewayId) {
+    headers['cf-aig-gateway-id'] = params.cloudflareGatewayId;
+  }
   return {
     url: requestUrl(params),
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${params.apiKey}`,
-      'content-type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(body),
   };
 }

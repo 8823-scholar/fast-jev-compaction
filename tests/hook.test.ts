@@ -106,11 +106,23 @@ describe('resolveCredentials', () => {
   it('reads the Cloudflare token and account id for the cloudflare provider', async () => {
     const config = resolveHookConfig({ provider: 'cloudflare' });
     const resolved = await resolveCredentials(
-      host({ CLOUDFLARE_API_TOKEN: 'cf-token', CLOUDFLARE_ACCOUNT_ID: 'cf-acc', TYPESAFE_API_KEY: 'ignored' }),
+      host({
+        CLOUDFLARE_API_TOKEN: 'cf-token',
+        CLOUDFLARE_ACCOUNT_ID: 'cf-acc',
+        CLOUDFLARE_AI_GATEWAY_ID: 'cf-gw',
+        TYPESAFE_API_KEY: 'ignored',
+      }),
       config,
     );
     expect(resolved.apiKey).toBe('cf-token');
     expect(resolved.cloudflareAccountId).toBe('cf-acc');
+    expect(resolved.cloudflareGatewayId).toBe('cf-gw');
+
+    const typesafe = await resolveCredentials(
+      host({ TYPESAFE_API_KEY: 'ts', CLOUDFLARE_AI_GATEWAY_ID: 'cf-gw' }),
+      resolveHookConfig({}),
+    );
+    expect(typesafe.cloudflareGatewayId).toBeUndefined();
 
     const withUrl = await resolveCredentials(
       host({ CLOUDFLARE_API_TOKEN: 'cf-token', CLOUDFLARE_ACCOUNT_ID: 'cf-acc' }),
@@ -195,13 +207,19 @@ describe('compactSession', () => {
     const urls: string[] = [];
     const bodies: string[] = [];
     const config = {
-      ...resolveHookConfig({ preserveRecentMessages: 1, provider: 'cloudflare', cloudflareAccountId: 'acc' }),
+      ...resolveHookConfig({
+        preserveRecentMessages: 1,
+        provider: 'cloudflare',
+        cloudflareAccountId: 'acc',
+        cloudflareGatewayId: 'gw',
+      }),
       apiKey: 'cf-token',
     };
     const fetchFn = async (url: string, init?: { body?: string; headers?: Record<string, string> }) => {
       urls.push(url);
       bodies.push(init?.body ?? '');
       expect(init?.headers?.authorization).toBe('Bearer cf-token');
+      expect(init?.headers?.['cf-aig-gateway-id']).toBe('gw');
       const { questions } = JSON.parse(init?.body ?? '{}') as { questions: Record<string, unknown> };
       const answers = Object.fromEntries(
         Object.keys(questions).map((key) => [key, { type: 'noul', noul: 0.9 }]),
