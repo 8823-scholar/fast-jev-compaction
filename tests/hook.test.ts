@@ -220,15 +220,17 @@ describe('compactSession', () => {
       bodies.push(init?.body ?? '');
       expect(init?.headers?.authorization).toBe('Bearer cf-token');
       expect(init?.headers?.['cf-aig-gateway-id']).toBe('gw');
-      const { questions } = JSON.parse(init?.body ?? '{}') as { questions: Record<string, unknown> };
+      const { input } = JSON.parse(init?.body ?? '{}') as { input: { questions: Record<string, unknown> } };
       const answers = Object.fromEntries(
-        Object.keys(questions).map((key) => [key, { type: 'noul', noul: 0.9 }]),
+        Object.keys(input.questions).map((key) => [key, { type: 'noul', noul: 0.9 }]),
       );
       return { status: 200, ok: true, text: JSON.stringify({ result: { answers }, success: true, errors: [], messages: [] }) };
     };
     const { result: output } = await compactSession(transcript(), config, fetchFn);
-    expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/acc/ai/run/typesafe/jev']);
-    expect(JSON.parse(bodies[0]!)).not.toHaveProperty('model');
+    expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/acc/ai/run']);
+    const body = JSON.parse(bodies[0]!) as { model: string; input: { state: unknown; questions: unknown } };
+    expect(body.model).toBe('typesafe/jev');
+    expect(body.input.state).toBeDefined();
     expect(output.decisions.map((d) => d.action)).toEqual(['keep', 'keep']);
   });
 

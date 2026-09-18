@@ -6,7 +6,8 @@ export const CLOUDFLARE_MODEL = 'typesafe/jev';
 
 /**
  * Where Jev is served from. `typesafe` is the System One API; `cloudflare` is
- * the Workers AI catalog (`typesafe/jev`), reached with a Cloudflare API token.
+ * Cloudflare's `/ai/run` endpoint with the `typesafe/jev` model, reached with a
+ * Cloudflare API token and billed through AI Gateway (credits or BYOK).
  */
 export type JevProvider = 'typesafe' | 'cloudflare';
 
@@ -19,7 +20,7 @@ export interface JevRequestParams {
   apiKey: string;
   /** Default `typesafe`. */
   provider?: JevProvider;
-  /** Ignored for `cloudflare`, where the catalog pins the model version. */
+  /** Ignored for `cloudflare`, which always names `typesafe/jev`. */
   model?: string;
   /** Overrides the endpoint of either provider (for example an AI Gateway URL). */
   baseUrl?: string;
@@ -37,7 +38,7 @@ export interface JevRequest {
 }
 
 export function cloudflareRunUrl(accountId: string): string {
-  return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CLOUDFLARE_MODEL}`;
+  return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run`;
 }
 
 function requestUrl(params: JevRequestParams): string {
@@ -59,7 +60,7 @@ export function buildJevRequest(
 ): JevRequest {
   const cloudflare = params.provider === 'cloudflare';
   const body = cloudflare
-    ? { state, questions }
+    ? { model: CLOUDFLARE_MODEL, input: { state, questions } }
     : { model: params.model ?? DEFAULT_MODEL, state, questions };
   const headers: Record<string, string> = {
     authorization: `Bearer ${params.apiKey}`,

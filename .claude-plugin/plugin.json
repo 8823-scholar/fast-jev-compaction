@@ -7,7 +7,7 @@
     "provider": {
       "type": "string",
       "title": "Jev provider",
-      "description": "Where Jev is served from: typesafe (System One API) or cloudflare (Workers AI typesafe/jev).",
+      "description": "Where Jev is served from: typesafe (System One API) or cloudflare (Cloudflare AI typesafe/jev, billed through AI Gateway).",
       "default": "typesafe"
     },
     "apiKey": {
@@ -76,7 +76,7 @@
     "model": {
       "type": "string",
       "title": "Jev model",
-      "description": "TypeSafe Jev model name. Ignored by the cloudflare provider, whose catalog pins the version.",
+      "description": "TypeSafe Jev model name. Ignored by the cloudflare provider, which always sends typesafe/jev.",
       "default": "jev-latest"
     }
   }

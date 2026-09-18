@@ -66,9 +66,11 @@ through `TYPESAFE_API_KEY`. The environment variable is the recommended
 development setup. With `provider` set to `cloudflare`, the hook instead
 reads a Cloudflare API token from `apiKey` or `CLOUDFLARE_API_TOKEN` and the
 account id from `cloudflareAccountId` or `CLOUDFLARE_ACCOUNT_ID`, and sends
-the requests to the Workers AI `typesafe/jev` endpoint (`baseUrl` overrides
-the URL). `cloudflareGatewayId` or `CLOUDFLARE_AI_GATEWAY_ID` routes them
-through that AI Gateway via the `cf-aig-gateway-id` header. The variables are
+the requests to Cloudflare's `/ai/run` endpoint as model `typesafe/jev`
+(`baseUrl` overrides the URL). Every such request goes through an AI Gateway
+(the account's default one, or the one named by `cloudflareGatewayId` /
+`CLOUDFLARE_AI_GATEWAY_ID` via the `cf-aig-gateway-id` header) and is billed
+from that gateway's credits or BYOK key. The variables are
 looked up in the process environment first, then in `settings.json` `env`.
 
 Every option except `apiKey`, `compactAtPercent`, `minReductionRatio`,

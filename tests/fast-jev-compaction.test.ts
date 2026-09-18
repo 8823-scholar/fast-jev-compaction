@@ -410,10 +410,13 @@ describe('HTTP client', () => {
       'state',
       questions,
     );
-    expect(request.url).toBe('https://api.cloudflare.com/client/v4/accounts/acc/ai/run/typesafe/jev');
+    expect(request.url).toBe('https://api.cloudflare.com/client/v4/accounts/acc/ai/run');
     expect(request.headers.authorization).toBe('Bearer cf');
     expect(request.headers).not.toHaveProperty('cf-aig-gateway-id');
-    expect(JSON.parse(request.body)).toEqual({ state: 'state', questions });
+    expect(JSON.parse(request.body)).toEqual({
+      model: 'typesafe/jev',
+      input: { state: 'state', questions },
+    });
 
     const viaGateway = buildJevRequest(
       { apiKey: 'cf', provider: 'cloudflare', cloudflareAccountId: 'acc', cloudflareGatewayId: 'gw' },
@@ -427,11 +430,11 @@ describe('HTTP client', () => {
     ).not.toHaveProperty('cf-aig-gateway-id');
 
     const gateway = buildJevRequest(
-      { apiKey: 'cf', provider: 'cloudflare', baseUrl: 'https://gw.example/workers-ai/typesafe/jev' },
+      { apiKey: 'cf', provider: 'cloudflare', baseUrl: 'https://gw.example/ai/run' },
       'state',
       questions,
     );
-    expect(gateway.url).toBe('https://gw.example/workers-ai/typesafe/jev');
+    expect(gateway.url).toBe('https://gw.example/ai/run');
 
     expect(() => buildJevRequest({ apiKey: 'cf', provider: 'cloudflare' }, 'state', questions)).toThrow(
       /cloudflareAccountId/,
@@ -475,7 +478,7 @@ describe('HTTP client', () => {
         }) as typeof fetch,
       });
       await client.ask('state', { q: { type: 'noul', instructions: 'x' } });
-      expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/cf-acc/ai/run/typesafe/jev']);
+      expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/cf-acc/ai/run']);
 
       delete process.env.CLOUDFLARE_API_TOKEN;
       await expect(new JevClient({ provider: 'cloudflare' }).ask('s', {})).rejects.toThrow(/CLOUDFLARE_API_TOKEN/);

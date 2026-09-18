@@ -96,16 +96,18 @@ The building blocks (`collectToolCalls`, `fitState`, `batchCalls`,
 `apiKey` defaults to `process.env.TYPESAFE_API_KEY`. Never commit the key or
 put it in a source file.
 
-Jev is also served from Cloudflare's Workers AI catalog as `typesafe/jev`.
-With `provider: 'cloudflare'` the request goes to
-`https://api.cloudflare.com/client/v4/accounts/<account>/ai/run/typesafe/jev`
-with a Cloudflare API token (`CLOUDFLARE_API_TOKEN`) and account id
-(`CLOUDFLARE_ACCOUNT_ID`); the request body carries no `model`, and a
-`{ result, success }` envelope around the answers is unwrapped. Set
-`cloudflareGatewayId` (`CLOUDFLARE_AI_GATEWAY_ID`) to route the requests
-through an AI Gateway for logs and analytics: the URL stays the same and the
-gateway is named in the `cf-aig-gateway-id` header. `baseUrl` replaces the
-whole URL for either provider.
+Jev is also served by Cloudflare as the model `typesafe/jev`. With
+`provider: 'cloudflare'` the request goes to
+`https://api.cloudflare.com/client/v4/accounts/<account>/ai/run` as
+`{ model: 'typesafe/jev', input: { state, questions } }` with a Cloudflare API
+token (`CLOUDFLARE_API_TOKEN`) and account id (`CLOUDFLARE_ACCOUNT_ID`); a
+`{ result, success }` envelope around the answers is unwrapped. Cloudflare
+routes every such request through an AI Gateway and bills it from that
+gateway's credits (Unified Billing) or a TypeSafe key stored on it (BYOK);
+without either the request fails with `402 Insufficient balance`. Set
+`cloudflareGatewayId` (`CLOUDFLARE_AI_GATEWAY_ID`) to pick the gateway (the
+`cf-aig-gateway-id` header); otherwise the account's default gateway is used.
+`baseUrl` replaces the whole URL for either provider.
 
 ```ts
 const result = await compactMessages(transcript, {
@@ -175,8 +177,8 @@ claude plugin install fast-jev-compaction@fast-jev-compaction
 The install prompts for the plugin options (API key, thresholds, `truncateHeadChars`,
 …); leave them at their defaults to use `TYPESAFE_API_KEY` from the environment.
 
-To call Jev through Cloudflare Workers AI instead, set the `provider` option
-to `cloudflare` and provide a Cloudflare API token with Workers AI access plus
+To call Jev through Cloudflare instead, set the `provider` option to
+`cloudflare` and provide a Cloudflare API token with Workers AI access plus
 the account id, either as the `apiKey` / `cloudflareAccountId` options or in
 the environment:
 
@@ -191,11 +193,12 @@ the environment:
 }
 ```
 
-The token needs `Workers AI Read` and `Workers AI Edit`. With
-`CLOUDFLARE_AI_GATEWAY_ID` (or the `cloudflareGatewayId` option) every request
-is routed through that AI Gateway, so its logs show each compaction request;
-an authenticated gateway additionally needs `AI Gateway Run` on the same token.
-The `model` option is not sent to Cloudflare.
+The token needs `Workers AI Read` and `Workers AI Edit`. Jev on Cloudflare is
+billed through AI Gateway, so the gateway (the account's default one, or the
+one named by `CLOUDFLARE_AI_GATEWAY_ID` / `cloudflareGatewayId`) must hold
+credits or a stored TypeSafe key; its logs then show each compaction request.
+An authenticated gateway additionally needs `AI Gateway Run` on the same
+token. The `model` option is not sent to Cloudflare.
 Restart Claude Code or run `/reload-plugins`. From then on `/compact` (and
 auto-compaction) goes through Jev: the toast reads
 `fast-jev-compaction: kept N/M messages, no summary (…)` when the pruned history
