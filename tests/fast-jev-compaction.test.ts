@@ -403,11 +403,73 @@ describe('HTTP client', () => {
     });
   });
 
+  it('builds a Cloudflare Workers AI request', () => {
+    const questions = { q: { type: 'noul', instructions: 'x' } } as const;
+    const request = buildJevRequest(
+      { apiKey: 'cf', provider: 'cloudflare', cloudflareAccountId: 'acc', model: 'jev-x' },
+      'state',
+      questions,
+    );
+    expect(request.url).toBe('https://api.cloudflare.com/client/v4/accounts/acc/ai/run/typesafe/jev');
+    expect(request.headers.authorization).toBe('Bearer cf');
+    expect(JSON.parse(request.body)).toEqual({ state: 'state', questions });
+
+    const gateway = buildJevRequest(
+      { apiKey: 'cf', provider: 'cloudflare', baseUrl: 'https://gw.example/workers-ai/typesafe/jev' },
+      'state',
+      questions,
+    );
+    expect(gateway.url).toBe('https://gw.example/workers-ai/typesafe/jev');
+
+    expect(() => buildJevRequest({ apiKey: 'cf', provider: 'cloudflare' }, 'state', questions)).toThrow(
+      /cloudflareAccountId/,
+    );
+  });
+
   it('rejects failed and malformed responses', () => {
     expect(() => parseJevResponse(500, false, 'boom')).toThrow(/500/);
     expect(() => parseJevResponse(200, true, 'not json')).toThrow(/malformed/);
     expect(() => parseJevResponse(200, true, '{}')).toThrow(/missing answers/);
+    expect(() => parseJevResponse(200, true, '{"result":{},"success":true}')).toThrow(/missing answers/);
     expect(parseJevResponse(200, true, '{"answers":{}}')).toEqual({ answers: {} });
+  });
+
+  it('unwraps the Cloudflare REST envelope', () => {
+    const body = JSON.stringify({
+      result: { model: 'jev-1.13.0', answers: { q: { type: 'noul', noul: 0.4 } } },
+      success: true,
+      errors: [],
+      messages: [],
+    });
+    expect(parseJevResponse(200, true, body)).toEqual({
+      model: 'jev-1.13.0',
+      answers: { q: { type: 'noul', noul: 0.4 } },
+    });
+  });
+
+  it('reads Cloudflare credentials from the environment', async () => {
+    const previous = { ...process.env };
+    process.env.CLOUDFLARE_API_TOKEN = 'cf-token';
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'cf-acc';
+    delete process.env.TYPESAFE_API_KEY;
+    try {
+      const urls: string[] = [];
+      const client = new JevClient({
+        provider: 'cloudflare',
+        fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+          urls.push(String(url));
+          expect((init?.headers as Record<string, string>).authorization).toBe('Bearer cf-token');
+          return new Response(JSON.stringify({ answers: { q: { noul: 0.4 } } }), { status: 200 });
+        }) as typeof fetch,
+      });
+      await client.ask('state', { q: { type: 'noul', instructions: 'x' } });
+      expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/cf-acc/ai/run/typesafe/jev']);
+
+      delete process.env.CLOUDFLARE_API_TOKEN;
+      await expect(new JevClient({ provider: 'cloudflare' }).ask('s', {})).rejects.toThrow(/CLOUDFLARE_API_TOKEN/);
+    } finally {
+      process.env = previous;
+    }
   });
 
   it('asks over fetch and refuses to run without a key', async () => {

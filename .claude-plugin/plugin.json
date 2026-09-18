@@ -4,11 +4,27 @@
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
+    "provider": {
+      "type": "string",
+      "title": "Jev provider",
+      "description": "Where Jev is served from: typesafe (System One API) or cloudflare (Workers AI typesafe/jev).",
+      "default": "typesafe"
+    },
     "apiKey": {
       "type": "string",
-      "title": "TypeSafe API key",
-      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY.",
+      "title": "API key",
+      "description": "TypeSafe API key, or a Cloudflare API token for the cloudflare provider. Leave unset to use TYPESAFE_API_KEY / CLOUDFLARE_API_TOKEN.",
       "sensitive": true
+    },
+    "cloudflareAccountId": {
+      "type": "string",
+      "title": "Cloudflare account id",
+      "description": "Account id for the cloudflare provider. Leave unset to use CLOUDFLARE_ACCOUNT_ID."
+    },
+    "baseUrl": {
+      "type": "string",
+      "title": "Endpoint override",
+      "description": "Full request URL replacing the provider's default, for example an AI Gateway URL."
     },
     "keepThreshold": {
       "type": "number",
@@ -55,7 +71,7 @@
     "model": {
       "type": "string",
       "title": "Jev model",
-      "description": "TypeSafe Jev model name.",
+      "description": "TypeSafe Jev model name. Ignored by the cloudflare provider, whose catalog pins the version.",
       "default": "jev-latest"
     }
   }

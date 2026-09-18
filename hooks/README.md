@@ -56,14 +56,22 @@ The plugin declares these `userConfig` values in
 | `maxRequestTokens` | `30000` |
 | `truncateHeadChars` | `300` |
 | `model` | `jev-latest` |
+| `provider` | `typesafe` |
+| `cloudflareAccountId` | — |
+| `baseUrl` | — |
 
 The TypeSafe key can be supplied as the sensitive `apiKey` plugin option or
 through `TYPESAFE_API_KEY`. The environment variable is the recommended
-development setup.
+development setup. With `provider` set to `cloudflare`, the hook instead
+reads a Cloudflare API token from `apiKey` or `CLOUDFLARE_API_TOKEN` and the
+account id from `cloudflareAccountId` or `CLOUDFLARE_ACCOUNT_ID`, and sends
+the requests to the Workers AI `typesafe/jev` endpoint (`baseUrl` overrides
+the URL, e.g. for an AI Gateway route). Both variables are looked up in the
+process environment first, then in `settings.json` `env`.
 
-Every option except `apiKey`, `compactAtPercent`, `minReductionRatio` and
-`model` is passed straight to the library; see the root README for what they
-do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
+Every option except `apiKey`, `compactAtPercent`, `minReductionRatio`,
+`model`, `provider`, `cloudflareAccountId` and `baseUrl` is passed straight
+to the library; see the root README for what they do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
 the response is malformed, the key is unavailable, the history cannot be
 fitted into the state budget, or the estimated reduction is below
 `minReductionRatio`, the hook logs a fallback and delegates to Claude Code's

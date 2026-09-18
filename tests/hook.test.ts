@@ -3,6 +3,7 @@ import {
   compactSession,
   decisionLog,
   decisionLogLines,
+  resolveCredentials,
   resolveHookConfig,
   summarize,
   toSessionMessages,
@@ -53,7 +54,12 @@ function jevFetch(answer: (name: string) => number, bodies: string[] = []) {
 
 describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
-    expect(resolveHookConfig({})).toEqual({ compactAtPercent: 60, minReductionRatio: 0.25, model: 'jev-latest' });
+    expect(resolveHookConfig({})).toEqual({
+      compactAtPercent: 60,
+      minReductionRatio: 0.25,
+      model: 'jev-latest',
+      provider: 'typesafe',
+    });
     expect(
       resolveHookConfig({ apiKey: 'k', keepThreshold: 0.3, maxStateTokens: 1000, model: 'jev-x', goal: 'g', compactAtPercent: 'no' }),
     ).toEqual({
@@ -64,7 +70,53 @@ describe('hook config', () => {
       goal: 'g',
       compactAtPercent: 60,
       minReductionRatio: 0.25,
+      provider: 'typesafe',
     });
+  });
+
+  it('reads the cloudflare provider with its account id and endpoint override', () => {
+    expect(resolveHookConfig({ provider: 'cloudflare', cloudflareAccountId: 'acc', baseUrl: 'https://gw.example/jev' })).toEqual({
+      compactAtPercent: 60,
+      minReductionRatio: 0.25,
+      model: 'jev-latest',
+      provider: 'cloudflare',
+      cloudflareAccountId: 'acc',
+      baseUrl: 'https://gw.example/jev',
+    });
+    expect(() => resolveHookConfig({ provider: 'openai' })).toThrow(/unknown provider/);
+  });
+});
+
+describe('resolveCredentials', () => {
+  function host(env: Record<string, string>, settingsEnv: Record<string, string> = {}) {
+    return {
+      env: { get: async (name: string) => env[name] },
+      settings: { read: async () => ({ env: settingsEnv }) },
+    };
+  }
+
+  it('reads the TypeSafe key from the process, then settings.json', async () => {
+    const config = resolveHookConfig({});
+    expect((await resolveCredentials(host({ TYPESAFE_API_KEY: 'env-key' }), config)).apiKey).toBe('env-key');
+    expect((await resolveCredentials(host({}, { TYPESAFE_API_KEY: 'settings-key' }), config)).apiKey).toBe('settings-key');
+    expect((await resolveCredentials(host({}), { ...config, apiKey: 'opt' })).apiKey).toBe('opt');
+    expect((await resolveCredentials(host({}), config)).apiKey).toBeUndefined();
+  });
+
+  it('reads the Cloudflare token and account id for the cloudflare provider', async () => {
+    const config = resolveHookConfig({ provider: 'cloudflare' });
+    const resolved = await resolveCredentials(
+      host({ CLOUDFLARE_API_TOKEN: 'cf-token', CLOUDFLARE_ACCOUNT_ID: 'cf-acc', TYPESAFE_API_KEY: 'ignored' }),
+      config,
+    );
+    expect(resolved.apiKey).toBe('cf-token');
+    expect(resolved.cloudflareAccountId).toBe('cf-acc');
+
+    const withUrl = await resolveCredentials(
+      host({ CLOUDFLARE_API_TOKEN: 'cf-token', CLOUDFLARE_ACCOUNT_ID: 'cf-acc' }),
+      { ...config, baseUrl: 'https://gw.example/jev' },
+    );
+    expect(withUrl.cloudflareAccountId).toBeUndefined();
   });
 });
 
@@ -139,9 +191,42 @@ describe('compactSession', () => {
     expect(decisionLogLines({ ...output, decisions: [] })).toEqual(['decisions: (none)']);
   });
 
+  it('sends Cloudflare requests to the Workers AI endpoint and unwraps its envelope', async () => {
+    const urls: string[] = [];
+    const bodies: string[] = [];
+    const config = {
+      ...resolveHookConfig({ preserveRecentMessages: 1, provider: 'cloudflare', cloudflareAccountId: 'acc' }),
+      apiKey: 'cf-token',
+    };
+    const fetchFn = async (url: string, init?: { body?: string; headers?: Record<string, string> }) => {
+      urls.push(url);
+      bodies.push(init?.body ?? '');
+      expect(init?.headers?.authorization).toBe('Bearer cf-token');
+      const { questions } = JSON.parse(init?.body ?? '{}') as { questions: Record<string, unknown> };
+      const answers = Object.fromEntries(
+        Object.keys(questions).map((key) => [key, { type: 'noul', noul: 0.9 }]),
+      );
+      return { status: 200, ok: true, text: JSON.stringify({ result: { answers }, success: true, errors: [], messages: [] }) };
+    };
+    const { result: output } = await compactSession(transcript(), config, fetchFn);
+    expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/acc/ai/run/typesafe/jev']);
+    expect(JSON.parse(bodies[0]!)).not.toHaveProperty('model');
+    expect(output.decisions.map((d) => d.action)).toEqual(['keep', 'keep']);
+  });
+
   it('throws on a missing key and on failed requests so the hook falls back', async () => {
     const config = resolveHookConfig({ preserveRecentMessages: 1 });
     await expect(compactSession(transcript(), config, jevFetch(() => 0))).rejects.toThrow(/TYPESAFE_API_KEY/);
+    await expect(
+      compactSession(transcript(), resolveHookConfig({ preserveRecentMessages: 1, provider: 'cloudflare' }), jevFetch(() => 0)),
+    ).rejects.toThrow(/CLOUDFLARE_API_TOKEN/);
+    await expect(
+      compactSession(
+        transcript(),
+        { ...resolveHookConfig({ preserveRecentMessages: 1, provider: 'cloudflare' }), apiKey: 'k' },
+        jevFetch(() => 0),
+      ),
+    ).rejects.toThrow(/cloudflareAccountId/);
     await expect(
       compactSession(transcript(), { ...config, apiKey: 'k' }, async () => ({ status: 500, ok: false, text: 'x' })),
     ).rejects.toThrow(/500/);

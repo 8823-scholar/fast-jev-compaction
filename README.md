@@ -96,13 +96,31 @@ The building blocks (`collectToolCalls`, `fitState`, `batchCalls`,
 `apiKey` defaults to `process.env.TYPESAFE_API_KEY`. Never commit the key or
 put it in a source file.
 
+Jev is also served from Cloudflare's Workers AI catalog as `typesafe/jev`.
+With `provider: 'cloudflare'` the request goes to
+`https://api.cloudflare.com/client/v4/accounts/<account>/ai/run/typesafe/jev`
+with a Cloudflare API token (`CLOUDFLARE_API_TOKEN`) and account id
+(`CLOUDFLARE_ACCOUNT_ID`); the request body carries no `model`, and a
+`{ result, success }` envelope around the answers is unwrapped. `baseUrl`
+replaces the whole URL for either provider, e.g. a Cloudflare AI Gateway
+route in front of Workers AI.
+
+```ts
+const result = await compactMessages(transcript, {
+  provider: 'cloudflare',
+  cloudflareAccountId: '<account id>', // or CLOUDFLARE_ACCOUNT_ID
+});
+```
+
 ## Options
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `apiKey` | `TYPESAFE_API_KEY` | TypeSafe API key (`compactMessages`/`JevClient`) |
-| `model` | `jev-latest` | Jev model name |
-| `baseUrl` | `https://api.typesafe.ai/v1/systemone` | System One endpoint |
+| `provider` | `typesafe` | `typesafe` (System One API) or `cloudflare` (Workers AI) |
+| `apiKey` | `TYPESAFE_API_KEY` / `CLOUDFLARE_API_TOKEN` | Credential of the provider (`compactMessages`/`JevClient`) |
+| `cloudflareAccountId` | `CLOUDFLARE_ACCOUNT_ID` | Account id for the `cloudflare` provider |
+| `model` | `jev-latest` | Jev model name; ignored by `cloudflare` |
+| `baseUrl` | provider endpoint | Full request URL override (e.g. an AI Gateway URL) |
 | `fetch` | native `fetch` | Injectable fetch implementation for tests |
 | `goal` | last 3 user prompts | Ongoing task description included in the state |
 | `keepThreshold` | `0.5` | Minimum keep probability for a call or result to stay |
@@ -152,6 +170,25 @@ claude plugin install fast-jev-compaction@fast-jev-compaction
 
 The install prompts for the plugin options (API key, thresholds, `truncateHeadChars`,
 …); leave them at their defaults to use `TYPESAFE_API_KEY` from the environment.
+
+To call Jev through Cloudflare Workers AI instead, set the `provider` option
+to `cloudflare` and provide a Cloudflare API token with Workers AI access plus
+the account id, either as the `apiKey` / `cloudflareAccountId` options or in
+the environment:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
+    "CLOUDFLARE_API_TOKEN": "<token>",
+    "CLOUDFLARE_ACCOUNT_ID": "<account id>"
+  }
+}
+```
+
+The `model` option is not sent to Cloudflare. `baseUrl` can point the plugin
+at an AI Gateway route (`https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/workers-ai/typesafe/jev`),
+in which case the account id is not needed.
 Restart Claude Code or run `/reload-plugins`. From then on `/compact` (and
 auto-compaction) goes through Jev: the toast reads
 `fast-jev-compaction: kept N/M messages, no summary (…)` when the pruned history

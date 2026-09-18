@@ -9,7 +9,13 @@ import type {
 } from 'claude-code';
 
 import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
-import { buildJevRequest, DEFAULT_MODEL, parseJevResponse } from '../src/request.js';
+import {
+  apiKeyVariable,
+  buildJevRequest,
+  DEFAULT_MODEL,
+  parseJevResponse,
+  type JevProvider,
+} from '../src/request.js';
 import type {
   CompactOptions,
   CompactResult,
@@ -23,6 +29,7 @@ const HOOK_DEFAULTS = {
   compactAtPercent: 60,
   minReductionRatio: 0.25,
   model: DEFAULT_MODEL,
+  provider: 'typesafe' as JevProvider,
 };
 
 export type HookFetchInit = {
@@ -45,7 +52,20 @@ export type HookConfig = CompactOptions & {
   compactAtPercent: number;
   minReductionRatio: number;
   model: string;
+  provider: JevProvider;
+  baseUrl?: string;
+  cloudflareAccountId?: string;
 };
+
+/** The transport half of the config: what `buildJevRequest` needs beyond the key. */
+export type JevEndpoint = Pick<HookConfig, 'provider' | 'model' | 'baseUrl' | 'cloudflareAccountId'>;
+
+function optionProvider(options: PluginOptions): JevProvider {
+  const value = optionString(options, 'provider');
+  if (value === undefined) return HOOK_DEFAULTS.provider;
+  if (value === 'typesafe' || value === 'cloudflare') return value;
+  throw new Error(`unknown provider "${value}" (expected typesafe or cloudflare)`);
+}
 
 function optionNumber(options: PluginOptions, key: string, fallback: number): number {
   const value = options[key];
@@ -79,19 +99,20 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
       HOOK_DEFAULTS.minReductionRatio,
     ),
     model: optionString(options, 'model') ?? HOOK_DEFAULTS.model,
+    provider: optionProvider(options),
   };
-  const apiKey = optionString(options, 'apiKey');
-  if (apiKey) config.apiKey = apiKey;
-  const goal = optionString(options, 'goal');
-  if (goal) config.goal = goal;
+  for (const key of ['apiKey', 'goal', 'baseUrl', 'cloudflareAccountId'] as const) {
+    const value = optionString(options, key);
+    if (value) config[key] = value;
+  }
   return config;
 }
 
 /** A `JevAsker` over the engine's `$.http.fetch`. */
-export function jevAsker(fetchFn: HookFetch, apiKey: string, model: string): JevAsker {
+export function jevAsker(fetchFn: HookFetch, apiKey: string, endpoint: JevEndpoint): JevAsker {
   return {
     async ask(state, questions) {
-      const request = buildJevRequest({ apiKey, model }, state, questions);
+      const request = buildJevRequest({ apiKey, ...endpoint }, state, questions);
       const response = await fetchFn(request.url, {
         method: request.method,
         headers: request.headers,
@@ -167,8 +188,8 @@ export async function compactSession(
   config: HookConfig,
   fetchFn: HookFetch,
 ): Promise<SessionCompaction> {
-  if (!config.apiKey) throw new Error('TYPESAFE_API_KEY is not configured');
-  const result = await compact(messages, jevAsker(fetchFn, config.apiKey, config.model), config);
+  if (!config.apiKey) throw new Error(`${apiKeyVariable(config.provider)} is not configured`);
+  const result = await compact(messages, jevAsker(fetchFn, config.apiKey, config), config);
   return { result, messages: toSessionMessages(messages, result.messages) };
 }
 
@@ -224,23 +245,51 @@ export function decisionLogLines(
   );
 }
 
-async function getApiKey(
-  $: {
-    env: { get: (name: string) => Promise<string | undefined> };
-    settings: { read: () => Promise<Readonly<Record<string, unknown>>> };
-  },
-  config: HookConfig,
-): Promise<string | undefined> {
-  if (config.apiKey) return config.apiKey;
-  const fromEnv = await $.env.get('TYPESAFE_API_KEY');
+type HookEnv = {
+  env: { get: (name: string) => Promise<string | undefined> };
+  settings: { read: () => Promise<Readonly<Record<string, unknown>>> };
+};
+
+type CredentialVariable = 'TYPESAFE_API_KEY' | 'CLOUDFLARE_API_TOKEN' | 'CLOUDFLARE_ACCOUNT_ID';
+
+/** `$.env.get` requires a literal name, so each variable has its own call. */
+function processVariable($: HookEnv, name: CredentialVariable): Promise<string | undefined> {
+  switch (name) {
+    case 'TYPESAFE_API_KEY':
+      return $.env.get('TYPESAFE_API_KEY');
+    case 'CLOUDFLARE_API_TOKEN':
+      return $.env.get('CLOUDFLARE_API_TOKEN');
+    case 'CLOUDFLARE_ACCOUNT_ID':
+      return $.env.get('CLOUDFLARE_ACCOUNT_ID');
+  }
+}
+
+/** An environment variable from the process, then from `settings.json` `env`. */
+async function getVariable($: HookEnv, name: CredentialVariable): Promise<string | undefined> {
+  const fromEnv = await processVariable($, name);
   if (fromEnv) return fromEnv;
   const settings = await $.settings.read();
   const env = settings['env'];
   if (env && typeof env === 'object') {
-    const value = (env as Record<string, unknown>)['TYPESAFE_API_KEY'];
+    const value = (env as Record<string, unknown>)[name];
     if (typeof value === 'string' && value) return value;
   }
   return undefined;
+}
+
+/** The configured key and, for cloudflare, the account id; both fall back to the environment. */
+export async function resolveCredentials($: HookEnv, config: HookConfig): Promise<HookConfig> {
+  const resolved = { ...config };
+  if (!resolved.apiKey) {
+    resolved.apiKey = await getVariable(
+      $,
+      config.provider === 'cloudflare' ? 'CLOUDFLARE_API_TOKEN' : 'TYPESAFE_API_KEY',
+    );
+  }
+  if (config.provider === 'cloudflare' && !resolved.cloudflareAccountId && !resolved.baseUrl) {
+    resolved.cloudflareAccountId = await getVariable($, 'CLOUDFLARE_ACCOUNT_ID');
+  }
+  return resolved;
 }
 
 function notify(
@@ -262,7 +311,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
 
   on('session.compact', async ($, event, next) => {
     try {
-      const config = { ...configured, apiKey: await getApiKey($, configured) };
+      const config = await resolveCredentials($, configured);
       const { result, messages } = await compactSession(event.messages, config, async (url, init) => {
         const response = await $.http.fetch(url, init);
         return { status: response.status, ok: response.ok, text: response.text };
