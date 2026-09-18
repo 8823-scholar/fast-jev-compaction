@@ -27,6 +27,7 @@ import type {
 
 const HOOK_DEFAULTS = {
   compactAtPercent: 60,
+  logDecisions: false,
   minReductionRatio: 0.25,
   model: DEFAULT_MODEL,
   provider: 'typesafe' as JevProvider,
@@ -50,6 +51,8 @@ export type HookFetch = (url: string, init?: HookFetchInit) => Promise<HookFetch
 export type HookConfig = CompactOptions & {
   apiKey?: string;
   compactAtPercent: number;
+  /** Log every per-call decision with its probabilities (long; for diagnosis). */
+  logDecisions: boolean;
   minReductionRatio: number;
   model: string;
   provider: JevProvider;
@@ -76,6 +79,11 @@ function optionNumber(options: PluginOptions, key: string, fallback: number): nu
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function optionBoolean(options: PluginOptions, key: string, fallback: boolean): boolean {
+  const value = options[key];
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function optionString(options: PluginOptions, key: string): string | undefined {
   const value = options[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -97,6 +105,7 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
   const config: HookConfig = {
     ...numbers,
     compactAtPercent: optionNumber(options, 'compactAtPercent', HOOK_DEFAULTS.compactAtPercent),
+    logDecisions: optionBoolean(options, 'logDecisions', HOOK_DEFAULTS.logDecisions),
     minReductionRatio: optionNumber(
       options,
       'minReductionRatio',
@@ -331,7 +340,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         const response = await $.http.fetch(url, init);
         return { status: response.status, ok: response.ok, text: response.text };
       });
-      for (const line of decisionLogLines(result)) $.ui.log(line);
+      if (config.logDecisions) for (const line of decisionLogLines(result)) $.ui.log(line);
       if (reductionRatio(result) < config.minReductionRatio) {
         notify(
           $,

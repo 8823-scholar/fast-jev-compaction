@@ -49,6 +49,12 @@
       "description": "Context percentage at which turn.complete requests compaction.",
       "default": 60
     },
+    "logDecisions": {
+      "type": "boolean",
+      "title": "Log per-call decisions",
+      "description": "Log every tool call's keep/drop decision with its probabilities after each compaction (long; for diagnosis).",
+      "default": false
+    },
     "minReductionRatio": {
       "type": "number",
       "title": "Minimum reduction ratio",

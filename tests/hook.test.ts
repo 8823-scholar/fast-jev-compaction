@@ -56,6 +56,7 @@ describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
     expect(resolveHookConfig({})).toEqual({
       compactAtPercent: 60,
+      logDecisions: false,
       minReductionRatio: 0.25,
       model: 'jev-latest',
       provider: 'typesafe',
@@ -69,6 +70,7 @@ describe('hook config', () => {
       model: 'jev-x',
       goal: 'g',
       compactAtPercent: 60,
+      logDecisions: false,
       minReductionRatio: 0.25,
       provider: 'typesafe',
     });
@@ -77,6 +79,7 @@ describe('hook config', () => {
   it('reads the cloudflare provider with its account id and endpoint override', () => {
     expect(resolveHookConfig({ provider: 'cloudflare', cloudflareAccountId: 'acc', baseUrl: 'https://gw.example/jev' })).toEqual({
       compactAtPercent: 60,
+      logDecisions: false,
       minReductionRatio: 0.25,
       model: 'jev-latest',
       provider: 'cloudflare',
@@ -84,6 +87,11 @@ describe('hook config', () => {
       baseUrl: 'https://gw.example/jev',
     });
     expect(() => resolveHookConfig({ provider: 'openai' })).toThrow(/unknown provider/);
+  });
+
+  it('reads logDecisions only as a boolean', () => {
+    expect(resolveHookConfig({ logDecisions: true }).logDecisions).toBe(true);
+    expect(resolveHookConfig({ logDecisions: 'yes' }).logDecisions).toBe(false);
   });
 });
 
