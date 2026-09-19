@@ -17,7 +17,7 @@ import type {
 } from './types.js';
 
 export const WINDOW_CONTEXT =
-  'A coding assistant conversation is being compacted to free context. It is too long to show at once, so `history` is one part of it, oldest first: the messages `window.from` to `window.to` of `window.of`, with a few neighbouring messages around them for context. `user_notes` is what the user said elsewhere in the conversation about things that must be kept or will be needed again. Tool outputs are replaced by a short `result` note and long texts may be abridged. Each question asks whether one tool call of this part, or the full output of that call, still needs to stay in the history verbatim. Whatever is not kept is deleted permanently, but the assistant can always re-run a tool or re-read a file.';
+  'A coding assistant conversation is being compacted to free context. It is too long to show at once, so `history` is one part of it, oldest first: the messages `window.from` to `window.to` of `window.of`, with a few neighbouring messages around them for context. `user_notes` is what the user said elsewhere in the conversation about things that must be kept or will be needed again. Tool outputs are replaced by a short `result` note (status, size and, where there is room, how the output starts) and long texts may be abridged. Each question asks whether one tool call of this part, or the full output of that call, still needs to stay in the history verbatim. Whatever is not kept is deleted permanently, but the assistant can always re-run a tool or re-read a file.';
 
 export const NOTES_CONTEXT =
   '`messages` are the things a user said to a coding assistant over a long conversation, oldest first, with long ones abridged. The conversation is about to be compacted: old tool outputs will be deleted unless something says they are still needed. Each question asks whether one message tells the assistant to keep, remember or not lose something (an output, a value, a file content, a result), or says that something will be needed again later.';
@@ -135,7 +135,7 @@ export function windowStates(
   const bodyAt = (inputChars: number): HistoryEntry[] => {
     let body = rendered.get(inputChars);
     if (!body) {
-      body = historyEntries(messages, calls, inputChars)
+      body = historyEntries(messages, calls, inputChars, inputChars === INPUT_CHARS[0])
         .filter((entry) => entry.i < tailStart)
         .map((entry) => ({
           ...entry,

@@ -84,6 +84,8 @@ describe('options', () => {
       maxRequestTokens: 30_000,
       truncateHeadChars: 300,
       windowTokens: 8_000,
+      resultHeadChars: 200,
+      keepCallInputChars: 600,
     });
     expect(resolveOptions({
       keepThreshold: Number.NaN,
@@ -160,10 +162,10 @@ describe('state fitting', () => {
     ];
     const { state, stage, tokens } = fitState(messages, collectToolCalls(messages, 0), {
       ...fit,
-      maxStateTokens: 300,
+      maxStateTokens: 320,
     });
     expect(stage).toBe('inputs<=200');
-    expect(tokens).toBeLessThanOrEqual(300);
+    expect(tokens).toBeLessThanOrEqual(320);
     expect(state.history[0]?.text).toBe('start');
     expect((state.history[1]?.tool_calls?.[0] as HistoryToolCall).input.length).toBeLessThanOrEqual(200);
   });
@@ -351,7 +353,12 @@ describe('compact', () => {
     const output = await compact(
       messages,
       fakeJev((name) => (name.startsWith('call_') ? 0.9 : 0.1), seen),
-      { preserveRecentMessages: 1, maxRequestTokens: stateTokens + 150 },
+      {
+        preserveRecentMessages: 1,
+        maxRequestTokens: stateTokens + 150,
+        resultHeadChars: 0,
+        keepCallInputChars: 0,
+      },
     );
 
     expect(output.stats.requests).toBe(seen.length);
@@ -506,6 +513,58 @@ describe('user notes', () => {
     const many = batchNotes(candidates, { maxStateTokens: 1_000, maxRequestTokens: 30_000 });
     expect(many.length).toBeGreaterThan(1);
     expect(many.flat()).toEqual(candidates);
+  });
+});
+
+describe('result heads', () => {
+  it('shows Jev how each output starts and drops that first when the state is too big', () => {
+    const messages = transcript();
+    const calls = collectToolCalls(messages, 1, 40);
+    expect(calls[2]!.resultHead).toBe('FAIL b.test.ts: expected 2 to be 3');
+    expect(calls[0]!.resultHead).toHaveLength(40);
+    const shown = fitState(messages, calls, { ...fit, preserveRecentMessages: 1 });
+    expect(shown.stage).toBe('full');
+    const notes = shown.state.history.flatMap((entry) =>
+      ((entry.tool_calls ?? []) as HistoryToolCall[]).map((c) => c.result),
+    );
+    expect(notes[2]).toBe('error, 34 chars: FAIL b.test.ts: expected 2 to be 3');
+    expect(notes[0]).toMatch(/^ok, 1000 chars, starts: export const a = 1; /);
+
+    const tight = fitState(messages, calls, {
+      ...fit,
+      preserveRecentMessages: 1,
+      maxStateTokens: shown.tokens - 1,
+    });
+    expect(tight.stage).toBe('result heads dropped');
+    expect(JSON.stringify(tight.state)).not.toContain('starts:');
+  });
+
+  it('leaves the heads out when resultHeadChars is 0', () => {
+    const calls = collectToolCalls(transcript(), 1);
+    expect(calls.every((c) => c.resultHead === '')).toBe(true);
+  });
+});
+
+describe('keeping small calls', () => {
+  const low = { keepCall: 0.1, keepResult: 0.1 };
+
+  it('only drops the result of a call with a small input', () => {
+    const small = { id: 't1', tool: 'Bash', pinned: false, input: { command: 'npm test' } };
+    const large = { id: 't2', tool: 'Write', pinned: false, input: { content: 'x'.repeat(5000) } };
+    const options = { keepThreshold: 0.5, keepCallInputChars: 600 };
+    expect(decideCall(small, low, options).action).toBe('drop_result');
+    expect(decideCall(large, low, options).action).toBe('drop_call');
+    expect(decideCall(small, low, { keepThreshold: 0.5, keepCallInputChars: 0 }).action).toBe('drop_call');
+    expect(decideCall({ id: 't3', tool: 'Bash', pinned: false }, low, options).action).toBe('drop_call');
+  });
+
+  it('keeps the record of what was run in the compacted transcript', async () => {
+    const output = await compact(transcript(), fakeJev(() => 0.1), { preserveRecentMessages: 1 });
+    expect(output.stats.callsDropped).toBe(0);
+    const tools = output.messages.flatMap((m) => m.toolUses.map((t) => t.tool_use_id));
+    expect(tools).toEqual(['tool-1', 'tool-2', 'tool-3']);
+    const kept = output.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 'tool-1')!;
+    expect(kept.text).toContain('fast-jev-compaction truncated');
   });
 });
 

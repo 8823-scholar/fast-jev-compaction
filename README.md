@@ -24,7 +24,9 @@ built-in compaction summary with the original messages.
    the first message or in the newest `preserveRecentMessages` messages are
    pinned and never touched.
 2. The **state** sent to Jev is the whole conversation so far, oldest first,
-   with every tool result replaced by a short note (`ok, 4213 chars (omitted)`).
+   with every tool result replaced by a short note: status, size and the first
+   `resultHeadChars` characters (`ok, 4213 chars, starts: …`), so Jev judges an
+   output it has at least seen the start of.
    Tool inputs are included, texts are included, nothing is summarized.
 3. The state is fitted into `maxStateTokens` (25k by default) in stages, each
    applied only if the previous one was not enough: tool inputs truncated to
@@ -50,9 +52,14 @@ built-in compaction summary with the original messages.
    concurrently and their answers are merged.
 6. Decisions per call, against `keepThreshold`:
    - `keepResult ≥ threshold` → keep call and result;
-   - else `keepCall ≥ threshold` → keep the call, truncate the result to its
+   - else `keepCall ≥ threshold`, or the call's input is at most
+     `keepCallInputChars` long → keep the call, truncate the result to its
      first `truncateHeadChars` characters plus a one-line note;
    - else → remove the call together with its result.
+
+   Small calls (a command, a path, a pattern) always stay because they are the
+   assistant's record of what it already tried; without it, it repeats itself.
+   Calls with a large input (a written file, an edit) follow Jev's answer.
 7. The message list is rebuilt: a message that loses all its content is
    removed, untouched messages are returned as the same objects, and no result
    is ever left without its call.
@@ -151,6 +158,8 @@ const result = await compactMessages(transcript, {
 | `maxRequestTokens` | `30000` | Estimated ceiling for state plus one batch of questions |
 | `truncateHeadChars` | `300` | Characters of a dropped tool result retained before its note |
 | `windowTokens` | `8000` | History per window when a long conversation is judged in windows; `0` never splits |
+| `resultHeadChars` | `200` | Characters of each tool output shown to Jev in the state; `0` shows only status and size |
+| `keepCallInputChars` | `600` | Calls with an input up to this size are never removed, only their results; `0` lets Jev decide |
 
 `result.stats` reports message and character counts before and after, the
 per-reason decision counts, the state size in estimated tokens, which fitting

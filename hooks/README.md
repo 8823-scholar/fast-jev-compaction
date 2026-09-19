@@ -57,6 +57,8 @@ The plugin declares these `userConfig` values in
 | `maxRequestTokens` | `30000` |
 | `truncateHeadChars` | `300` |
 | `windowTokens` | `8000` |
+| `resultHeadChars` | `200` |
+| `keepCallInputChars` | `600` |
 | `model` | `jev-latest` |
 | `provider` | `typesafe` |
 | `cloudflareAccountId` | — |

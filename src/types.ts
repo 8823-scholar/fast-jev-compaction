@@ -42,6 +42,8 @@ export interface ToolCall {
   /** Index of the message holding the tool_result block. */
   resultIndex: number;
   resultChars: number;
+  /** The start of the output, whitespace collapsed; '' when heads are off. */
+  resultHead: string;
   isError: boolean;
   /** In the first or the newest preserved messages; never a candidate. */
   pinned: boolean;
@@ -135,6 +137,18 @@ export interface CompactOptions {
    * windows; 0 never splits and shrinks the single state instead. Default 8000.
    */
   windowTokens?: number;
+  /**
+   * Characters of each tool output shown to Jev in the state, so it judges an
+   * output it has seen the start of; 0 shows only status and size. Default 200.
+   */
+  resultHeadChars?: number;
+  /**
+   * A call whose serialised input is at most this long is never removed, only
+   * its result, so the assistant still knows what it already ran; calls with a
+   * larger input (a written file, an edit) follow Jev's answer. 0 lets Jev
+   * decide for every call. Default 600.
+   */
+  keepCallInputChars?: number;
 }
 
 export interface ResolvedCompactOptions {
@@ -145,6 +159,8 @@ export interface ResolvedCompactOptions {
   maxRequestTokens: number;
   truncateHeadChars: number;
   windowTokens: number;
+  resultHeadChars: number;
+  keepCallInputChars: number;
 }
 
 export interface CompactResult {

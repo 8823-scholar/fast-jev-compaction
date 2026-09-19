@@ -31,6 +31,8 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   maxRequestTokens: 30_000,
   truncateHeadChars: 300,
   windowTokens: 8_000,
+  resultHeadChars: 200,
+  keepCallInputChars: 600,
 };
 
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
@@ -43,7 +45,7 @@ const WINDOW_CONCURRENCY = 8;
  * The `fitState` stages that still show the texts around each call. The later
  * stages delete them, and with them the reason a call may have to stay.
  */
-const KEEPS_TEXTS = /^(full|inputs<=\d+|texts abridged)$/;
+const KEEPS_TEXTS = /^(full|result heads dropped|inputs<=\d+|texts abridged)$/;
 
 function finite(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -71,6 +73,14 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
     windowTokens: Math.max(
       0,
       Math.floor(finite(options.windowTokens, DEFAULT_OPTIONS.windowTokens)),
+    ),
+    resultHeadChars: Math.max(
+      0,
+      Math.floor(finite(options.resultHeadChars, DEFAULT_OPTIONS.resultHeadChars)),
+    ),
+    keepCallInputChars: Math.max(
+      0,
+      Math.floor(finite(options.keepCallInputChars, DEFAULT_OPTIONS.keepCallInputChars)),
     ),
   };
 }
@@ -121,17 +131,28 @@ export function batchCalls(
   return batches;
 }
 
+function inputChars(input: Record<string, unknown> | undefined): number {
+  if (!input) return Number.POSITIVE_INFINITY;
+  try {
+    return JSON.stringify(input).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
 export function decideCall(
-  call: Pick<ToolCall, 'id' | 'tool' | 'pinned'>,
+  call: Pick<ToolCall, 'id' | 'tool' | 'pinned'> & Partial<Pick<ToolCall, 'input'>>,
   answer: CallAnswer,
-  options: Pick<ResolvedCompactOptions, 'keepThreshold'>,
+  options: Pick<ResolvedCompactOptions, 'keepThreshold'> &
+    Partial<Pick<ResolvedCompactOptions, 'keepCallInputChars'>>,
 ): CallDecision {
   const base = { id: call.id, tool: call.tool, ...answer };
   if (call.pinned) return { ...base, action: 'keep', reason: 'pinned' };
   if (answer.keepResult >= options.keepThreshold) {
     return { ...base, action: 'keep', reason: 'kept' };
   }
-  if (answer.keepCall >= options.keepThreshold) {
+  const small = inputChars(call.input) <= (options.keepCallInputChars ?? 0);
+  if (small || answer.keepCall >= options.keepThreshold) {
     return { ...base, action: 'drop_result', reason: 'result_dropped' };
   }
   return { ...base, action: 'drop_call', reason: 'call_dropped' };
@@ -342,7 +363,11 @@ export async function compact(
 ): Promise<CompactResult> {
   const started = Date.now();
   const resolved = resolveOptions(options);
-  const calls = collectToolCalls(messages, resolved.preserveRecentMessages);
+  const calls = collectToolCalls(
+    messages,
+    resolved.preserveRecentMessages,
+    resolved.resultHeadChars,
+  );
   const candidates = calls.filter((call) => !call.pinned);
   const charsBefore = messages.reduce((sum, message) => sum + messageChars(message), 0);
 

@@ -79,6 +79,18 @@
       "description": "Characters of a tool result kept when Jev decides its full output is no longer needed; 0 keeps only the note.",
       "default": 300
     },
+    "resultHeadChars": {
+      "type": "number",
+      "title": "Output start shown to Jev",
+      "description": "Characters of each tool output shown to Jev so it judges an output it has seen the start of; 0 shows only status and size.",
+      "default": 200
+    },
+    "keepCallInputChars": {
+      "type": "number",
+      "title": "Always keep calls with an input up to",
+      "description": "A tool call whose input is at most this many characters is never removed, only its result, so the assistant still knows what it already ran; 0 lets Jev decide for every call.",
+      "default": 600
+    },
     "windowTokens": {
       "type": "number",
       "title": "Window size",
