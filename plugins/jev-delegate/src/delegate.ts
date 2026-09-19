@@ -1,5 +1,4 @@
-import { noulAnswer } from './request.js';
-import type { JevAnswer, JevQuestions } from './types.js';
+import { noulAnswer, type JevAnswer, type JevQuestions } from './jev.js';
 
 export const DELEGATE_CONTEXT =
   'A coding assistant is in the middle of a turn. `user_prompt` is what the user asked, `assistant_messages` is what the assistant has said so far in this turn, oldest first, and `recent_tool_calls` are the tools it ran most recently, oldest first. `tool_calls_so_far` and `edits_so_far` count its own work in this turn.';
@@ -124,8 +123,8 @@ export function delegateState(progress: TurnProgress): Record<string, unknown> {
 /** What the model reads after the tool result at a checkpoint that calls for a hand-over. */
 export function delegateNudge(progress: TurnProgress, model: string): string {
   return [
-    `[fast-jev delegate check] You have run ${progress.calls.length} tool calls yourself in this turn (${progress.edits} edits), and what remains looks like carrying out a plan you have already settled.`,
-    `Hand the remaining work to a subagent now: write a self-contained brief (goal, the files and decisions so far, constraints, how to verify, what to report back) and call the Agent tool with subagent_type "fast-jev-compaction:worker" (or another fitting type) and model "${model}". Split independent parts across several agents in one message.`,
+    `[jev-delegate] You have run ${progress.calls.length} tool calls yourself in this turn (${progress.edits} edits), and what remains looks like carrying out a plan you have already settled.`,
+    `Hand the remaining work to a subagent now: write a self-contained brief (goal, the files and decisions so far, constraints, how to verify, what to report back) and call the Agent tool with subagent_type "jev-delegate:worker" (or another fitting type) and model "${model}". Split independent parts across several agents in one message.`,
     'Keep for yourself only what needs the user or this conversation. When the agent reports back, check its work before you report. If you decide not to delegate, say why in one short sentence and continue.',
   ].join(' ');
 }

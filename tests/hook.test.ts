@@ -56,8 +56,6 @@ describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
     expect(resolveHookConfig({})).toEqual({
       compactAtPercent: 60,
-      delegateAfterCalls: 0,
-      delegateModel: 'opus',
       logDecisions: false,
       minReductionRatio: 0.25,
       model: 'jev-latest',
@@ -72,8 +70,6 @@ describe('hook config', () => {
       model: 'jev-x',
       goal: 'g',
       compactAtPercent: 60,
-      delegateAfterCalls: 0,
-      delegateModel: 'opus',
       logDecisions: false,
       minReductionRatio: 0.25,
       provider: 'typesafe',
@@ -83,8 +79,6 @@ describe('hook config', () => {
   it('reads the cloudflare provider with its account id and endpoint override', () => {
     expect(resolveHookConfig({ provider: 'cloudflare', cloudflareAccountId: 'acc', baseUrl: 'https://gw.example/jev' })).toEqual({
       compactAtPercent: 60,
-      delegateAfterCalls: 0,
-      delegateModel: 'opus',
       logDecisions: false,
       minReductionRatio: 0.25,
       model: 'jev-latest',

@@ -1,0 +1,53 @@
+{
+  "name": "jev-delegate",
+  "version": "0.1.0",
+  "description": "Asks Jev mid-turn whether what remains is the execution of a settled plan, and if so tells the main model to hand it to a subagent.",
+  "license": "MIT",
+  "userConfig": {
+    "provider": {
+      "type": "string",
+      "title": "Jev provider",
+      "description": "Where Jev is served from: typesafe (System One API) or cloudflare (Cloudflare AI typesafe/jev, billed through AI Gateway).",
+      "default": "typesafe"
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "API key",
+      "description": "TypeSafe API key, or a Cloudflare API token for the cloudflare provider. Leave unset to use TYPESAFE_API_KEY / CLOUDFLARE_API_TOKEN.",
+      "sensitive": true
+    },
+    "cloudflareAccountId": {
+      "type": "string",
+      "title": "Cloudflare account id",
+      "description": "Account id for the cloudflare provider. Leave unset to use CLOUDFLARE_ACCOUNT_ID."
+    },
+    "cloudflareGatewayId": {
+      "type": "string",
+      "title": "Cloudflare AI Gateway id",
+      "description": "AI Gateway to route cloudflare requests through. Leave unset to use CLOUDFLARE_AI_GATEWAY_ID or the account's default gateway."
+    },
+    "baseUrl": {
+      "type": "string",
+      "title": "Endpoint override",
+      "description": "Full request URL, replacing the provider's endpoint."
+    },
+    "afterCalls": {
+      "type": "number",
+      "title": "First check after this many own tool calls",
+      "description": "Once the main loop has run this many tool calls itself in a turn (then at growing intervals), Jev is asked whether what remains is the execution of a settled plan. 0 turns the plugin off.",
+      "default": 12
+    },
+    "delegateModel": {
+      "type": "string",
+      "title": "Model named in the nudge",
+      "description": "The model the nudge tells the assistant to pass to the Agent tool.",
+      "default": "opus"
+    },
+    "model": {
+      "type": "string",
+      "title": "Jev model",
+      "description": "TypeSafe Jev model name. Ignored by the cloudflare provider, which always sends typesafe/jev.",
+      "default": "jev-latest"
+    }
+  }
+}

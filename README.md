@@ -238,6 +238,13 @@ To run from a checkout without installing: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 
 from the repository root. No publishing step is required; the marketplace is
 just the repo's `.claude-plugin/marketplace.json`.
 
+## Second plugin: jev-delegate
+
+The marketplace also carries [`plugins/jev-delegate`](plugins/jev-delegate/README.md),
+an unrelated use of Jev: a mid-turn check that tells the main model to hand a
+settled plan to a subagent. Install it with
+`claude plugin install jev-delegate@fast-jev-compaction`.
+
 ## Development
 
 ```sh

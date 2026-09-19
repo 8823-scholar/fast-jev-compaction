@@ -3,9 +3,9 @@ import {
   DelegateTracker,
   assistantMessagesOfTurn,
   delegateCheck,
-  resolveHookConfig,
+  resolveDelegateConfig,
   type HookFetch,
-} from '../hooks/fast-jev.js';
+} from '../plugins/jev-delegate/hooks/jev-delegate.js';
 import {
   DELEGATE_QUESTIONS,
   callLine,
@@ -13,7 +13,7 @@ import {
   delegateState,
   delegateVerdict,
   isCheckpoint,
-} from '../src/index.js';
+} from '../plugins/jev-delegate/src/delegate.js';
 
 const noul = (values: Record<string, number>) =>
   Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { type: 'noul' as const, noul: value }]));
@@ -80,6 +80,7 @@ describe('call lines and state', () => {
     const text = delegateNudge({ prompt: '', assistantMessages: [], calls: ['a', 'b'], edits: 1 }, 'opus');
     expect(text).toContain('2 tool calls');
     expect(text).toContain('model "opus"');
+    expect(text).toContain('jev-delegate:worker');
   });
 });
 
@@ -129,7 +130,7 @@ describe('delegate check', () => {
 
   it('sends the turn so far and returns the nudge when Jev calls for a hand-over', async () => {
     const bodies: string[] = [];
-    const config = { ...resolveHookConfig({ delegateAfterCalls: 12, delegateModel: 'sonnet' }), apiKey: 'k' };
+    const config = { ...resolveDelegateConfig({ delegateModel: 'sonnet' }), apiKey: 'k' };
     const { verdict, nudge } = await delegateCheck(progress, config, fetchWith(handOver, bodies));
     expect(verdict.delegable).toBe(true);
     expect(nudge).toContain('model "sonnet"');
@@ -139,14 +140,35 @@ describe('delegate check', () => {
   });
 
   it('returns no nudge otherwise and refuses to run without a key', async () => {
-    const config = { ...resolveHookConfig({ delegateAfterCalls: 12 }), apiKey: 'k' };
+    const config = { ...resolveDelegateConfig({}), apiKey: 'k' };
     const { nudge } = await delegateCheck(progress, config, fetchWith({ ...handOver, almost_done: 0.9 }));
     expect(nudge).toBeUndefined();
-    await expect(delegateCheck(progress, resolveHookConfig({}), fetchWith(handOver))).rejects.toThrow(/TYPESAFE_API_KEY/);
+    await expect(delegateCheck(progress, resolveDelegateConfig({}), fetchWith(handOver))).rejects.toThrow(/TYPESAFE_API_KEY/);
   });
 
-  it('is off by default', () => {
-    expect(resolveHookConfig({}).delegateAfterCalls).toBe(0);
-    expect(resolveHookConfig({}).delegateModel).toBe('opus');
+  it('reads its options', () => {
+    expect(resolveDelegateConfig({})).toEqual({
+      afterCalls: 12,
+      delegateModel: 'opus',
+      model: 'jev-latest',
+      provider: 'typesafe',
+    });
+    expect(resolveDelegateConfig({ afterCalls: 0, provider: 'cloudflare', cloudflareAccountId: 'acc' })).toMatchObject({
+      afterCalls: 0,
+      provider: 'cloudflare',
+      cloudflareAccountId: 'acc',
+    });
+    expect(() => resolveDelegateConfig({ provider: 'openai' })).toThrow(/unknown provider/);
+  });
+
+  it('builds a Cloudflare request when configured for it', async () => {
+    const urls: string[] = [];
+    const config = { ...resolveDelegateConfig({ provider: 'cloudflare', cloudflareAccountId: 'acc' }), apiKey: 'cf' };
+    await delegateCheck(progress, config, async (url, init) => {
+      urls.push(url);
+      expect(JSON.parse(init?.body ?? '{}').model).toBe('typesafe/jev');
+      return { status: 200, ok: true, text: JSON.stringify({ result: { result: { answers: noul(handOver) } }, success: true }) };
+    });
+    expect(urls).toEqual(['https://api.cloudflare.com/client/v4/accounts/acc/ai/run']);
   });
 });
