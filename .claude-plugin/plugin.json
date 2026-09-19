@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
@@ -90,6 +90,12 @@
       "title": "Always keep calls with an input up to",
       "description": "A tool call whose input is at most this many characters is never removed, only its result, so the assistant still knows what it already ran; 0 lets Jev decide for every call.",
       "default": 600
+    },
+    "keepCallsRecent": {
+      "type": "number",
+      "title": "Newest calls protected",
+      "description": "How many of the newest tool calls the rule above protects; older calls follow Jev's answer, so later compactions still have something to cut.",
+      "default": 60
     },
     "windowTokens": {
       "type": "number",

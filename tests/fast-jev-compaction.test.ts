@@ -87,6 +87,7 @@ describe('options', () => {
       windowTokens: 8_000,
       resultHeadChars: 200,
       keepCallInputChars: 600,
+      keepCallsRecent: 60,
     });
     expect(resolveOptions({
       keepThreshold: Number.NaN,
@@ -566,6 +567,32 @@ describe('keeping small calls', () => {
     expect(tools).toEqual(['tool-1', 'tool-2', 'tool-3']);
     const kept = output.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 'tool-1')!;
     expect(kept.text).toContain('fast-jev-compaction truncated');
+  });
+});
+
+describe('repeated compactions', () => {
+  it('protects only the newest small calls, so older ones can still go', async () => {
+    const output = await compact(longTranscript(10), fakeJev(() => 0.1), {
+      preserveRecentMessages: 2,
+      keepCallsRecent: 3,
+    });
+    expect(output.stats.resultsDropped).toBe(3);
+    expect(output.stats.callsDropped).toBe(7);
+    const left = output.messages.flatMap((m) => m.toolUses.map((t) => t.tool_use_id));
+    expect(left).toEqual(['tool-7', 'tool-8', 'tool-9']);
+  });
+
+  it('does not ask again about a protected call whose result is already cut', async () => {
+    const first = await compact(longTranscript(6), fakeJev(() => 0.1), { preserveRecentMessages: 2 });
+    expect(first.stats.resultsDropped).toBe(6);
+    const calls = collectToolCalls(first.messages, 2);
+    expect(calls.every((c) => c.resultTruncated)).toBe(true);
+
+    const seen: Seen[] = [];
+    const second = await compact(first.messages, fakeJev(() => 0.1, seen), { preserveRecentMessages: 2 });
+    expect(seen).toHaveLength(0);
+    expect(second.stats).toMatchObject({ requests: 0, kept: 6, resultsDropped: 0, callsDropped: 0 });
+    expect(second.messages).toEqual(first.messages);
   });
 });
 

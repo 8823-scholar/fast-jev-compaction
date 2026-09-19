@@ -44,6 +44,8 @@ export interface ToolCall {
   resultChars: number;
   /** The start of the output, whitespace collapsed; '' when heads are off. */
   resultHead: string;
+  /** An earlier compaction already cut this result down to its head. */
+  resultTruncated: boolean;
   isError: boolean;
   /** In the first or the newest preserved messages; never a candidate. */
   pinned: boolean;
@@ -149,6 +151,13 @@ export interface CompactOptions {
    * decide for every call. Default 600.
    */
   keepCallInputChars?: number;
+  /**
+   * How many of the newest candidate calls `keepCallInputChars` protects.
+   * Older calls follow Jev's answer: what was tried long ago is told by the
+   * texts, and calls kept forever leave later compactions nothing to cut.
+   * Default 60.
+   */
+  keepCallsRecent?: number;
 }
 
 export interface ResolvedCompactOptions {
@@ -161,6 +170,7 @@ export interface ResolvedCompactOptions {
   windowTokens: number;
   resultHeadChars: number;
   keepCallInputChars: number;
+  keepCallsRecent: number;
 }
 
 export interface CompactResult {

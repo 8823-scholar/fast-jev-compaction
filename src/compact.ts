@@ -1,5 +1,5 @@
 import { noulAnswer } from './request.js';
-import { collectToolCalls, estimateTokens, fitState } from './state.js';
+import { TRUNCATION_MARK, collectToolCalls, estimateTokens, fitState } from './state.js';
 import {
   NOTES_CONTEXT,
   batchNotes,
@@ -33,6 +33,7 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   windowTokens: 8_000,
   resultHeadChars: 200,
   keepCallInputChars: 600,
+  keepCallsRecent: 60,
 };
 
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
@@ -81,6 +82,10 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
     keepCallInputChars: Math.max(
       0,
       Math.floor(finite(options.keepCallInputChars, DEFAULT_OPTIONS.keepCallInputChars)),
+    ),
+    keepCallsRecent: Math.max(
+      0,
+      Math.floor(finite(options.keepCallsRecent, DEFAULT_OPTIONS.keepCallsRecent)),
     ),
   };
 }
@@ -235,7 +240,7 @@ function singleState(
 function truncatedResultText(text: string, isError: boolean, headChars: number): string {
   if (text.length <= headChars + 120) return text;
   const head = headChars > 0 ? `${text.slice(0, headChars)}\n` : '';
-  return `${head}[fast-jev-compaction truncated ${text.length - headChars} chars of this tool result${
+  return `${head}${TRUNCATION_MARK}${text.length - headChars} chars of this tool result${
     isError ? ' (error)' : ''
   }; re-run the tool if needed]`;
 }
@@ -368,7 +373,18 @@ export async function compact(
     resolved.preserveRecentMessages,
     resolved.resultHeadChars,
   );
-  const candidates = calls.filter((call) => !call.pinned);
+  const unpinned = calls.filter((call) => !call.pinned);
+  const recent = new Set(
+    unpinned
+      .slice(Math.max(0, unpinned.length - resolved.keepCallsRecent))
+      .filter((call) => inputChars(call.input) <= resolved.keepCallInputChars)
+      .map((call) => call.id),
+  );
+  // A protected call whose result is already cut has nothing left to decide.
+  const settled = new Set(
+    unpinned.filter((call) => recent.has(call.id) && call.resultTruncated).map((call) => call.id),
+  );
+  const candidates = unpinned.filter((call) => !settled.has(call.id));
   const charsBefore = messages.reduce((sum, message) => sum + messageChars(message), 0);
 
   let fitted: { tokens: number; stage: string } = { tokens: 0, stage: '' };
@@ -404,7 +420,10 @@ export async function compact(
   }
 
   const decisions = calls.map((call) =>
-    decideCall(call, answers.get(call.id) ?? { keepCall: 1, keepResult: 1 }, resolved),
+    decideCall(call, answers.get(call.id) ?? { keepCall: 1, keepResult: 1 }, {
+      keepThreshold: resolved.keepThreshold,
+      keepCallInputChars: recent.has(call.id) ? resolved.keepCallInputChars : 0,
+    }),
   );
   const kept = applyDecisions(
     messages,

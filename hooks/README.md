@@ -59,6 +59,7 @@ The plugin declares these `userConfig` values in
 | `windowTokens` | `8000` |
 | `resultHeadChars` | `200` |
 | `keepCallInputChars` | `600` |
+| `keepCallsRecent` | `60` |
 | `model` | `jev-latest` |
 | `provider` | `typesafe` |
 | `cloudflareAccountId` | — |

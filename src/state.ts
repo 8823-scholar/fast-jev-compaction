@@ -8,6 +8,9 @@ import type {
   ToolResult,
 } from './types.js';
 
+/** Starts the note `applyDecisions` leaves where it cut a result. */
+export const TRUNCATION_MARK = '[fast-jev-compaction truncated ';
+
 export const STATE_CONTEXT =
   'A coding assistant conversation is being compacted to free context. `history` is the whole conversation so far, oldest first; tool outputs are replaced by a short `result` note (status, size and, where there is room, how the output starts) and long texts may be abridged. Each question asks whether one tool call, or the full output of that call, still needs to stay in the history verbatim. Whatever is not kept is deleted permanently, but the assistant can always re-run a tool or re-read a file.';
 
@@ -88,6 +91,7 @@ export function collectToolCalls(
           resultHeadChars > 0
             ? truncate(found.result.text.replace(/\s+/g, ' ').trim(), resultHeadChars)
             : '',
+        resultTruncated: found.result.text.includes(TRUNCATION_MARK),
         isError: found.result.isError ?? false,
         pinned:
           isPinned(callIndex, messages.length, preserveRecentMessages) ||

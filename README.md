@@ -57,9 +57,13 @@ built-in compaction summary with the original messages.
      first `truncateHeadChars` characters plus a one-line note;
    - else → remove the call together with its result.
 
-   Small calls (a command, a path, a pattern) always stay because they are the
-   assistant's record of what it already tried; without it, it repeats itself.
-   Calls with a large input (a written file, an edit) follow Jev's answer.
+   The newest `keepCallsRecent` small calls (a command, a path, a pattern) stay
+   because they are the assistant's record of what it just tried; without it,
+   it repeats itself. Older ones follow Jev's answer like calls with a large
+   input (a written file, an edit): kept forever they pile up, and each later
+   compaction finds less to cut until it falls back to the built-in summary.
+   A protected call whose result an earlier compaction already cut is not
+   asked about again.
 7. The message list is rebuilt: a message that loses all its content is
    removed, untouched messages are returned as the same objects, and no result
    is ever left without its call.
@@ -163,6 +167,7 @@ const result = await compactMessages(transcript, {
 | `windowTokens` | `8000` | History per window when a long conversation is judged in windows; `0` never splits |
 | `resultHeadChars` | `200` | Characters of each tool output shown to Jev in the state; `0` shows only status and size |
 | `keepCallInputChars` | `600` | Calls with an input up to this size are never removed, only their results; `0` lets Jev decide |
+| `keepCallsRecent` | `60` | How many of the newest calls `keepCallInputChars` protects |
 
 `result.stats` reports message and character counts before and after, the
 per-reason decision counts, the state size in estimated tokens, which fitting
