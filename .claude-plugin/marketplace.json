@@ -9,14 +9,14 @@
       "name": "fast-jev-compaction",
       "source": "./",
       "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "license": "MIT"
     },
     {
       "name": "jev-delegate",
       "source": "./plugins/jev-delegate",
       "description": "Mid-turn Jev check that tells the main model to hand a settled plan to a subagent.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "license": "MIT"
     }
   ]

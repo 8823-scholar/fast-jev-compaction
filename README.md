@@ -76,7 +76,10 @@ built-in compaction summary with the original messages.
    windows without a candidate call are skipped, and up to eight requests run
    at once. A 1200-message session is about 25 windows and a few seconds.
 
-Jev failures, malformed answers, a missing key, or a history that cannot be
+Every request is sent up to three times (after 0.3 s and 1 s) when the
+provider answers 5xx or 429 or the connection fails: a compaction is many
+requests and fails as a whole when one does. Jev failures that outlast that,
+malformed answers, a missing key, or a history that cannot be
 fitted throw; the caller (or the Claude Code hook) decides what to fall back to.
 
 ## Install and usage

@@ -14,6 +14,7 @@ import {
   buildJevRequest,
   DEFAULT_MODEL,
   parseJevResponse,
+  sendWithRetry,
   type JevProvider,
 } from '../src/request.js';
 import type {
@@ -125,15 +126,29 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
 }
 
 /** A `JevAsker` over the engine's `$.http.fetch`. */
-export function jevAsker(fetchFn: HookFetch, apiKey: string, endpoint: JevEndpoint): JevAsker {
+/** Waits between retries; `$.clock.sleep` in the engine. */
+export type HookSleep = (ms: number) => Promise<void>;
+
+const noSleep: HookSleep = () => Promise.resolve();
+
+export function jevAsker(
+  fetchFn: HookFetch,
+  apiKey: string,
+  endpoint: JevEndpoint,
+  sleep: HookSleep = noSleep,
+): JevAsker {
   return {
     async ask(state, questions) {
       const request = buildJevRequest({ apiKey, ...endpoint }, state, questions);
-      const response = await fetchFn(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: request.body,
-      });
+      const response = await sendWithRetry(
+        () =>
+          fetchFn(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+          }),
+        sleep,
+      );
       return parseJevResponse(response.status, response.ok, response.text);
     },
   };
@@ -203,9 +218,10 @@ export async function compactSession(
   messages: readonly SessionMessage[],
   config: HookConfig,
   fetchFn: HookFetch,
+  sleep?: HookSleep,
 ): Promise<SessionCompaction> {
   if (!config.apiKey) throw new Error(`${apiKeyVariable(config.provider)} is not configured`);
-  const result = await compact(messages, jevAsker(fetchFn, config.apiKey, config), config);
+  const result = await compact(messages, jevAsker(fetchFn, config.apiKey, config, sleep), config);
   return { result, messages: toSessionMessages(messages, result.messages) };
 }
 
@@ -339,10 +355,15 @@ export const register: Register = (on: On, options: PluginOptions) => {
   on('session.compact', async ($, event, next) => {
     try {
       const config = await resolveCredentials($, configured);
-      const { result, messages } = await compactSession(event.messages, config, async (url, init) => {
-        const response = await $.http.fetch(url, init);
-        return { status: response.status, ok: response.ok, text: response.text };
-      });
+      const { result, messages } = await compactSession(
+        event.messages,
+        config,
+        async (url, init) => {
+          const response = await $.http.fetch(url, init);
+          return { status: response.status, ok: response.ok, text: response.text };
+        },
+        (ms) => $.clock.sleep(ms),
+      );
       if (config.logDecisions) for (const line of decisionLogLines(result)) $.ui.log(line);
       if (reductionRatio(result) < config.minReductionRatio) {
         notify(

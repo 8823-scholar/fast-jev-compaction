@@ -16,6 +16,7 @@ import {
   buildJevRequest,
   DEFAULT_MODEL,
   parseJevResponse,
+  sendWithRetry,
   type JevProvider,
 } from '../src/jev.js';
 
@@ -204,6 +205,7 @@ export async function delegateCheck(
   progress: TurnProgress,
   config: DelegateConfig,
   fetchFn: HookFetch,
+  sleep: (ms: number) => Promise<void> = () => Promise.resolve(),
 ): Promise<{ verdict: DelegateVerdict; nudge?: string }> {
   if (!config.apiKey) throw new Error(`${apiKeyVariable(config.provider)} is not configured`);
   const request = buildJevRequest(
@@ -211,11 +213,15 @@ export async function delegateCheck(
     delegateState(progress),
     DELEGATE_QUESTIONS,
   );
-  const response = await fetchFn(request.url, {
-    method: request.method,
-    headers: request.headers,
-    body: request.body,
-  });
+  const response = await sendWithRetry(
+    () =>
+      fetchFn(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+      }),
+    sleep,
+  );
   const { answers } = parseJevResponse(response.status, response.ok, response.text);
   const verdict = delegateVerdict(answers);
   return verdict.delegable
@@ -246,10 +252,15 @@ export const register: Register = (on: On, options: PluginOptions) => {
     try {
       const config = await resolveCredentials($, configured);
       const progress = tracker.progress(assistantMessagesOfTurn(await $.session.messages()));
-      const { verdict, nudge } = await delegateCheck(progress, config, async (url, init) => {
-        const response = await $.http.fetch(url, init);
-        return { status: response.status, ok: response.ok, text: response.text };
-      });
+      const { verdict, nudge } = await delegateCheck(
+        progress,
+        config,
+        async (url, init) => {
+          const response = await $.http.fetch(url, init);
+          return { status: response.status, ok: response.ok, text: response.text };
+        },
+        (ms) => $.clock.sleep(ms),
+      );
       if (!nudge) return result;
       $.ui.log(
         `jev-delegate: nudge at ${progress.calls.length} calls (plan ${verdict.plan.toFixed(2)}, execution ${verdict.execution.toFixed(2)})`,

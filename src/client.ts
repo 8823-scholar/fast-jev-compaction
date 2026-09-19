@@ -3,6 +3,7 @@ import {
   buildJevRequest,
   parseJevResponse,
   type JevProvider,
+  sendWithRetry,
 } from './request.js';
 import type { JevAsker, JevQuestions, JevResponse, JevState } from './types.js';
 
@@ -61,11 +62,15 @@ export class JevClient implements JevAsker {
       state,
       questions,
     );
-    const response = await this.fetcher(request.url, {
-      method: request.method,
-      headers: request.headers,
-      body: request.body,
-    });
+    const response = await sendWithRetry(
+      () =>
+        this.fetcher(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+        }),
+      (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    );
     return parseJevResponse(response.status, response.ok, await response.text());
   }
 }

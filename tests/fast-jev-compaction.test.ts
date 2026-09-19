@@ -15,6 +15,7 @@ import {
   parseJevResponse,
   reductionRatio,
   resolveOptions,
+  sendWithRetry,
   windowStates,
   type HistoryToolCall,
   type JevAsker,
@@ -614,6 +615,63 @@ describe('compact in windows', () => {
     });
     expect(seen.every((s) => !('window' in (s.state as object)))).toBe(true);
     expect(output.stats.stateStage).not.toMatch(/^windowed/);
+  });
+});
+
+describe('retries', () => {
+  const responses = (statuses: (number | Error)[]) => {
+    let calls = 0;
+    const send = async () => {
+      const next = statuses[calls]!;
+      calls += 1;
+      if (next instanceof Error) throw next;
+      return { status: next };
+    };
+    return { send, calls: () => calls };
+  };
+
+  it('sends again after a server error, a rate limit or a transport error', async () => {
+    const waits: number[] = [];
+    const flaky = responses([500, new Error('socket hang up'), 200]);
+    const response = await sendWithRetry(flaky.send, async (ms) => void waits.push(ms));
+    expect(response.status).toBe(200);
+    expect(flaky.calls()).toBe(3);
+    expect(waits).toEqual([300, 1000]);
+    expect((await sendWithRetry(responses([429, 200]).send, async () => {})).status).toBe(200);
+  });
+
+  it('gives up after two retries and never repeats a refused request', async () => {
+    const down = responses([500, 502, 503, 200]);
+    expect((await sendWithRetry(down.send, async () => {})).status).toBe(503);
+    expect(down.calls()).toBe(3);
+    const refused = responses([400, 200]);
+    expect((await sendWithRetry(refused.send, async () => {})).status).toBe(400);
+    expect(refused.calls()).toBe(1);
+    await expect(
+      sendWithRetry(responses([new Error('a'), new Error('b'), new Error('c')]).send, async () => {}),
+    ).rejects.toThrow('c');
+  });
+
+  it('lets a compaction survive one failing request', async () => {
+    let calls = 0;
+    const flaky: JevAsker = {
+      async ask(state, questions) {
+        return fakeJev(() => 0.1).ask(state, questions);
+      },
+    };
+    const client = new JevClient({
+      apiKey: 'k',
+      fetch: (async (_url: string, init?: { body?: string }) => {
+        calls += 1;
+        if (calls === 1) return new Response('{"errors":[{"message":"Server Error"}]}', { status: 500 });
+        const { questions } = JSON.parse(init?.body ?? '{}') as { questions: Record<string, unknown> };
+        const { answers } = await flaky.ask('', questions as JevQuestions);
+        return new Response(JSON.stringify({ answers }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    const output = await compact(transcript(), client, { preserveRecentMessages: 1 });
+    expect(calls).toBe(2);
+    expect(output.stats.requests).toBe(1);
   });
 });
 

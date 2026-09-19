@@ -140,6 +140,37 @@ export function buildJevRequest(
   };
 }
 
+/** Waits between the attempts of one Jev request; two retries after the first try. */
+export const RETRY_DELAYS_MS = [300, 1000] as const;
+
+/** Server errors and rate limits pass; a request Jev refused (4xx) would fail again. */
+export function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+/**
+ * Sends one request, again after a transport error or a retryable status.
+ * A compaction is many requests and fails as a whole when one does, so an
+ * occasional 500 from the provider has to be absorbed here. Returns the last
+ * response, or throws the last transport error, once the retries are spent.
+ */
+export async function sendWithRetry<R extends { status: number }>(
+  send: () => Promise<R>,
+  sleep: (ms: number) => Promise<void>,
+  delays: readonly number[] = RETRY_DELAYS_MS,
+): Promise<R> {
+  for (let attempt = 0; ; attempt += 1) {
+    const delay = delays[attempt];
+    try {
+      const response = await send();
+      if (delay === undefined || !isRetryableStatus(response.status)) return response;
+    } catch (error) {
+      if (delay === undefined) throw error;
+    }
+    await sleep(delay);
+  }
+}
+
 function hasAnswers(value: unknown): value is JevResponse {
   return (
     value !== null &&
