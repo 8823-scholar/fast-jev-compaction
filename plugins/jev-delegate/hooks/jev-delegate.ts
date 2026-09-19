@@ -22,6 +22,7 @@ import {
 
 const DEFAULTS = {
   afterCalls: 12,
+  logSpawns: true,
   delegateModel: 'opus',
   model: DEFAULT_MODEL,
   provider: 'typesafe' as JevProvider,
@@ -51,6 +52,8 @@ export type DelegateConfig = {
   afterCalls: number;
   /** The model the nudge names for the subagent. */
   delegateModel: string;
+  /** Log which model every subagent starts on. */
+  logSpawns: boolean;
   model: string;
   provider: JevProvider;
   baseUrl?: string;
@@ -79,6 +82,7 @@ export function resolveDelegateConfig(options: PluginOptions): DelegateConfig {
         ? Math.max(0, Math.floor(afterCalls))
         : DEFAULTS.afterCalls,
     delegateModel: optionString(options, 'delegateModel') ?? DEFAULTS.delegateModel,
+    logSpawns: typeof options['logSpawns'] === 'boolean' ? options['logSpawns'] : DEFAULTS.logSpawns,
     model: optionString(options, 'model') ?? DEFAULTS.model,
     provider: optionProvider(options),
   };
@@ -229,8 +233,27 @@ export async function delegateCheck(
     : { verdict };
 }
 
+/** One line per started subagent: what it is for, its type, and the model it really runs on. */
+export function spawnLine(
+  spawn: { description: string; subagentType: string; fork: boolean; model?: string },
+  model: string,
+): string {
+  const kind = spawn.fork ? 'fork' : spawn.subagentType || 'agent';
+  const asked = spawn.model && spawn.model !== model ? ` (asked for ${spawn.model})` : '';
+  return `jev-delegate: ${kind} "${spawn.description}" → ${model}${asked}`;
+}
+
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveDelegateConfig(options);
+
+  if (configured.logSpawns) {
+    on('agent.spawn', async ($, event, next) => {
+      const result = await next(event);
+      if (result.model) $.ui.log(spawnLine(event, result.model));
+      return result;
+    });
+  }
+
   if (configured.afterCalls === 0) return;
   const tracker = new DelegateTracker(configured.afterCalls);
 

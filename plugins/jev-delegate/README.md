@@ -35,7 +35,17 @@ it is going to do.
   `jev-delegate:worker` on `delegateModel`, or say in a sentence why not. The
   nudge is logged with `$.ui.log`. A failed check is logged and changes nothing.
 
-`agents/worker.md` is the receiving end: an Opus agent that carries out a brief,
+With `logSpawns` (on by default) every started subagent also gets one line in
+the transcript with the model it really runs on, whoever started it:
+
+```
+jev-delegate: jev-delegate:worker "fxassets 多通貨対応の実装" → claude-opus-5 (asked for opus)
+jev-delegate: general-purpose "repository survey" → claude-fable-5-1
+jev-delegate: fork "worker fork" → claude-fable-5-1
+```
+
+An agent started without a model inherits the main loop's, which is the case
+worth seeing. `agents/worker.md` is the receiving end: an Opus agent that carries out a brief,
 verifies, and reports what it changed, how it checked, what it left out and
 what it assumed.
 
@@ -61,6 +71,7 @@ Credentials work as in fast-jev-compaction: `TYPESAFE_API_KEY`, or with the
 | --- | ---: |
 | `afterCalls` | `12` |
 | `delegateModel` | `opus` |
+| `logSpawns` | `true` |
 | `provider` | `typesafe` |
 | `model` | `jev-latest` |
 | `apiKey`, `cloudflareAccountId`, `cloudflareGatewayId`, `baseUrl` | — |

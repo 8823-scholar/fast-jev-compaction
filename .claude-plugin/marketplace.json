@@ -16,7 +16,7 @@
       "name": "jev-delegate",
       "source": "./plugins/jev-delegate",
       "description": "Mid-turn Jev check that tells the main model to hand a settled plan to a subagent.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "license": "MIT"
     }
   ]

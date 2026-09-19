@@ -4,6 +4,7 @@ import {
   assistantMessagesOfTurn,
   delegateCheck,
   resolveDelegateConfig,
+  spawnLine,
   type HookFetch,
 } from '../plugins/jev-delegate/hooks/jev-delegate.js';
 import {
@@ -120,6 +121,22 @@ describe('tracker', () => {
   });
 });
 
+describe('spawn log', () => {
+  it('names the type, the purpose and the model the agent really runs on', () => {
+    const base = { description: '資産画面の改修', subagentType: 'jev-delegate:worker', fork: false };
+    expect(spawnLine({ ...base, model: 'opus' }, 'claude-opus-5')).toBe(
+      'jev-delegate: jev-delegate:worker "資産画面の改修" → claude-opus-5 (asked for opus)',
+    );
+    expect(spawnLine(base, 'claude-fable-5-1')).toBe(
+      'jev-delegate: jev-delegate:worker "資産画面の改修" → claude-fable-5-1',
+    );
+    expect(spawnLine({ ...base, fork: true, model: 'claude-fable-5-1' }, 'claude-fable-5-1')).toBe(
+      'jev-delegate: fork "資産画面の改修" → claude-fable-5-1',
+    );
+    expect(resolveDelegateConfig({ logSpawns: false }).logSpawns).toBe(false);
+  });
+});
+
 describe('delegate check', () => {
   const progress = { prompt: 'refactor', assistantMessages: ['plan is set'], calls: ['Read: a.ts'], edits: 0 };
   const fetchWith = (values: Record<string, number>, bodies: string[] = []): HookFetch =>
@@ -150,6 +167,7 @@ describe('delegate check', () => {
     expect(resolveDelegateConfig({})).toEqual({
       afterCalls: 12,
       delegateModel: 'opus',
+      logSpawns: true,
       model: 'jev-latest',
       provider: 'typesafe',
     });
