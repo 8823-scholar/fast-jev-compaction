@@ -10,6 +10,17 @@ import type {
 
 import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
 import {
+  DELEGATE_QUESTIONS,
+  callLine,
+  delegateNudge,
+  delegateState,
+  delegateVerdict,
+  isCheckpoint,
+  isEditTool,
+  type DelegateVerdict,
+  type TurnProgress,
+} from '../src/delegate.js';
+import {
   apiKeyVariable,
   buildJevRequest,
   DEFAULT_MODEL,
@@ -27,6 +38,8 @@ import type {
 
 const HOOK_DEFAULTS = {
   compactAtPercent: 60,
+  delegateAfterCalls: 0,
+  delegateModel: 'opus',
   logDecisions: false,
   minReductionRatio: 0.25,
   model: DEFAULT_MODEL,
@@ -51,6 +64,13 @@ export type HookFetch = (url: string, init?: HookFetchInit) => Promise<HookFetch
 export type HookConfig = CompactOptions & {
   apiKey?: string;
   compactAtPercent: number;
+  /**
+   * Own tool calls in a turn after which Jev is first asked whether the rest
+   * should go to a subagent; 0 never asks.
+   */
+  delegateAfterCalls: number;
+  /** The model the nudge names for the subagent. */
+  delegateModel: string;
   /** Log every per-call decision with its probabilities (long; for diagnosis). */
   logDecisions: boolean;
   minReductionRatio: number;
@@ -108,6 +128,11 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
   const config: HookConfig = {
     ...numbers,
     compactAtPercent: optionNumber(options, 'compactAtPercent', HOOK_DEFAULTS.compactAtPercent),
+    delegateAfterCalls: Math.max(
+      0,
+      Math.floor(optionNumber(options, 'delegateAfterCalls', HOOK_DEFAULTS.delegateAfterCalls)),
+    ),
+    delegateModel: optionString(options, 'delegateModel') ?? HOOK_DEFAULTS.delegateModel,
     logDecisions: optionBoolean(options, 'logDecisions', HOOK_DEFAULTS.logDecisions),
     minReductionRatio: optionNumber(
       options,
@@ -332,9 +357,118 @@ function notify(
   $.ui.toast(text, { timeoutMs: 15_000 });
 }
 
+/**
+ * The main loop's own work in the current turn. A call made by a subagent is
+ * not counted, and a turn that already delegated is left alone.
+ */
+export class DelegateTracker {
+  private prompt = '';
+  private calls: string[] = [];
+  private edits = 0;
+  private delegated = false;
+
+  constructor(private readonly first: number) {}
+
+  turnStart(prompt: string): void {
+    this.prompt = prompt;
+    this.calls = [];
+    this.edits = 0;
+    this.delegated = false;
+  }
+
+  /** Records one call of the main loop; true when Jev should be asked now. */
+  record(tool: string, input: Record<string, unknown>): boolean {
+    if (tool === 'Agent' || tool === 'Task') {
+      this.delegated = true;
+      return false;
+    }
+    this.calls.push(callLine(tool, input));
+    if (isEditTool(tool)) this.edits += 1;
+    return !this.delegated && isCheckpoint(this.calls.length, this.first);
+  }
+
+  progress(assistantMessages: readonly string[]): TurnProgress {
+    return { prompt: this.prompt, assistantMessages, calls: [...this.calls], edits: this.edits };
+  }
+}
+
+/** What the assistant said since the user's last typed message. */
+export function assistantMessagesOfTurn(messages: readonly SessionMessage[]): string[] {
+  let start = 0;
+  messages.forEach((message, index) => {
+    if (
+      message.role === 'user' &&
+      message.text.trim().length > 0 &&
+      (message.toolResults ?? []).length === 0
+    ) {
+      start = index + 1;
+    }
+  });
+  return messages
+    .slice(start)
+    .filter((message) => message.role === 'assistant' && message.text.trim().length > 0)
+    .map((message) => message.text);
+}
+
+/** Asks Jev about the turn so far; the nudge is set when the rest should be handed over. */
+export async function delegateCheck(
+  progress: TurnProgress,
+  config: HookConfig,
+  fetchFn: HookFetch,
+): Promise<{ verdict: DelegateVerdict; nudge?: string }> {
+  if (!config.apiKey) throw new Error(`${apiKeyVariable(config.provider)} is not configured`);
+  const { answers } = await jevAsker(fetchFn, config.apiKey, config).ask(
+    delegateState(progress),
+    DELEGATE_QUESTIONS,
+  );
+  const verdict = delegateVerdict(answers);
+  return verdict.delegable
+    ? { verdict, nudge: delegateNudge(progress, config.delegateModel) }
+    : { verdict };
+}
+
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
   let compacting = false;
+
+  if (configured.delegateAfterCalls > 0) {
+    const tracker = new DelegateTracker(configured.delegateAfterCalls);
+
+    on('turn.start', ($, event, next) => {
+      tracker.turnStart(event.text);
+      return next(event);
+    });
+
+    on('tool.call', async ($, event, next) => {
+      const { tool, tool_use_id: _id, agentId, consent: _consent, ...input } = event as {
+        tool: string;
+        tool_use_id?: string;
+        agentId?: string;
+        consent?: string;
+      } & Record<string, unknown>;
+      const due = agentId === undefined && tracker.record(tool, input);
+      const result = await next(event);
+      if (!due || result.deny !== undefined) return result;
+      try {
+        const config = await resolveCredentials($, configured);
+        const progress = tracker.progress(assistantMessagesOfTurn(await $.session.messages()));
+        const { verdict, nudge } = await delegateCheck(progress, config, async (url, init) => {
+          const response = await $.http.fetch(url, init);
+          return { status: response.status, ok: response.ok, text: response.text };
+        });
+        if (!nudge) return result;
+        $.ui.log(
+          `fast-jev-compaction: delegate nudge at ${progress.calls.length} calls (plan ${verdict.plan.toFixed(2)}, execution ${verdict.execution.toFixed(2)})`,
+        );
+        return { ...result, context: [...(result.context ?? []), nudge] };
+      } catch (error) {
+        $.ui.log(
+          `fast-jev-compaction: delegate check skipped (${error instanceof Error ? error.message : String(error)})`,
+        );
+        return result;
+      }
+    });
+  }
 
   on('session.compact', async ($, event, next) => {
     try {

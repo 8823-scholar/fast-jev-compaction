@@ -53,6 +53,8 @@ The plugin declares these `userConfig` values in
 | `compactAtPercent` | `60` |
 | `minReductionRatio` | `0.25` |
 | `logDecisions` | `false` |
+| `delegateAfterCalls` | `0` |
+| `delegateModel` | `opus` |
 | `maxStateTokens` | `25000` |
 | `maxRequestTokens` | `30000` |
 | `truncateHeadChars` | `300` |
@@ -91,6 +93,29 @@ logged too (several thousand characters on long sessions). The
 `turn.complete` hook requests
 compaction when `context.percent` reaches `compactAtPercent`, with an
 in-flight guard.
+
+## Delegate check
+
+With `delegateAfterCalls` above 0 the plugin also watches how much work the
+main loop does itself. `turn.start` resets the count, `tool.call` counts every
+call of the main loop (a subagent's calls are not counted, and a turn that has
+called `Agent` is left alone). At `delegateAfterCalls` own calls, and again at
+growing distances (12, 25, 40, 60, then every 24 for a value of 12), Jev gets
+the user's prompt, what the assistant said so far in the turn and its last 12
+calls as one line each, and answers five `noul` questions: is there a settled
+plan, is what remains the execution of it, does it need the user, is the work
+nearly finished, is the assistant still investigating. When the first two are
+at or above 0.5 and the other three below, the tool result of that call
+carries a note only the model reads, telling it to write a brief and hand the
+rest to a subagent on `delegateModel` (the plugin ships one for this,
+`fast-jev-compaction:worker`, in `agents/worker.md`), or to say in a sentence
+why not. The
+nudge is logged with `$.ui.log`; a failed check is logged and changes nothing.
+
+On replayed heavy turns of real sessions the check fired at one checkpoint in
+five; 62% of those moments had 15 or more own calls still ahead (47% for a
+plain count rule) and 7% had fewer than 5 (16%). It judges the size and shape
+of what remains, not whether a subagent would do it well.
 
 ## Scope and caveat
 

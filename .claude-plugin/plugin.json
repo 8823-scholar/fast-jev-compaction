@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
@@ -48,6 +48,18 @@
       "title": "Compaction percentage",
       "description": "Context percentage at which turn.complete requests compaction.",
       "default": 60
+    },
+    "delegateAfterCalls": {
+      "type": "number",
+      "title": "Delegate check after this many own tool calls",
+      "description": "Once the main loop has run this many tool calls itself in a turn (then at growing intervals), Jev is asked whether what remains is the execution of a settled plan; if so the model is told to hand it to a subagent. 0 turns the check off.",
+      "default": 0
+    },
+    "delegateModel": {
+      "type": "string",
+      "title": "Model named in the delegate nudge",
+      "description": "The model the nudge tells the assistant to pass to the Agent tool.",
+      "default": "opus"
     },
     "logDecisions": {
       "type": "boolean",
