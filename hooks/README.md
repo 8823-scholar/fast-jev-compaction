@@ -84,9 +84,11 @@ Every option except `apiKey`, `compactAtPercent`, `logDecisions`, `minReductionR
 `baseUrl` is passed straight to the library (`dropThinkingRows` as
 `dropEmptyAssistant`); see the root README for what they do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
 the response is malformed, the key is unavailable, the history cannot be
-fitted into the state budget, or the estimated reduction is below
-`minReductionRatio`, the hook logs a fallback and delegates to Claude Code's
-built-in compaction. The outcome is shown as a toast and logged with the
+fitted into the state budget, or the reduction is below `minReductionRatio`
+both by visible characters and by an estimate against the real context size
+(the visible cut at 4 characters per token plus 500 tokens per thinking row
+dropped), the hook logs a fallback and delegates to Claude Code's built-in
+compaction. The outcome is shown as a toast and logged with the
 reduction, per-reason counts, state size and request count; with
 `logDecisions` on, per-call `decisions:` lines with both probabilities are
 logged too (several thousand characters on long sessions). The reduction in

@@ -247,6 +247,30 @@ export function summarize(result: CompactResult): string {
 
 const UI_LOG_MAX_CHARS = 4096;
 
+/** Conservative characters per token for the visible part of the context. */
+const CHARS_PER_TOKEN = 4;
+/**
+ * Tokens one dropped thinking row is taken to free. Measured on a long Fable
+ * session at about 750 (its encrypted thinking averaged 2.3k characters at
+ * roughly 3 per token); 500 keeps the estimate on the safe side.
+ */
+const THINKING_ROW_TOKENS = 500;
+
+/**
+ * The reduction against the real context size: what the visible cut frees at
+ * a conservative rate, plus what the dropped thinking rows free, over the
+ * tokens the last request was answered with. 0 when that size is unknown.
+ */
+export function estimatedReductionRatio(
+  result: Pick<CompactResult, 'stats'>,
+  beforeTokens: number | undefined,
+): number {
+  if (typeof beforeTokens !== 'number' || beforeTokens <= 0) return 0;
+  const { charsBefore, charsAfter, emptyDropped } = result.stats;
+  const freed = (charsBefore - charsAfter) / CHARS_PER_TOKEN + emptyDropped * THINKING_ROW_TOKENS;
+  return Math.min(1, Math.max(0, freed / beforeTokens));
+}
+
 function thousands(tokens: number): string {
   return `${Math.round(tokens / 1000)}k`;
 }
@@ -386,10 +410,16 @@ export const register: Register = (on: On, options: PluginOptions) => {
         (ms) => $.clock.sleep(ms),
       );
       if (config.logDecisions) for (const line of decisionLogLines(result)) $.ui.log(line);
-      if (reductionRatio(result) < config.minReductionRatio) {
+      // The summary's ratio counts visible characters only; the estimate adds
+      // the thinking rows, which weigh nothing there and most in the window.
+      const estimated = estimatedReductionRatio(result, before);
+      if (
+        reductionRatio(result) < config.minReductionRatio &&
+        estimated < config.minReductionRatio
+      ) {
         notify(
           $,
-          `fallback to built-in summary (below ${percent(config.minReductionRatio)} minimum: ${summarize(result)})`,
+          `fallback to built-in summary (below ${percent(config.minReductionRatio)} minimum: ${summarize(result)}; ~${percent(estimated)} of the real context)`,
         );
         return next(event);
       }

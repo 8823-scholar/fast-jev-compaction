@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   contextLine,
+  estimatedReductionRatio,
   compactSession,
   decisionLog,
   decisionLogLines,
@@ -102,6 +103,22 @@ describe('hook config', () => {
     expect(resolveHookConfig({}).dropEmptyAssistant).toBe(true);
     expect(resolveHookConfig({ dropThinkingRows: false }).dropEmptyAssistant).toBe(false);
     expect(resolveHookConfig({ dropThinkingRows: 'no' }).dropEmptyAssistant).toBe(true);
+  });
+});
+
+describe('estimatedReductionRatio', () => {
+  const stats = (charsBefore: number, charsAfter: number, emptyDropped: number) =>
+    ({ stats: { charsBefore, charsAfter, emptyDropped } }) as Parameters<typeof estimatedReductionRatio>[0];
+
+  it('counts the visible cut conservatively and 500 tokens per thinking row', () => {
+    expect(estimatedReductionRatio(stats(400_000, 368_000, 697), 569_000)).toBeCloseTo((8_000 + 348_500) / 569_000, 5);
+    expect(estimatedReductionRatio(stats(1_000, 1_000, 0), 100_000)).toBe(0);
+    expect(estimatedReductionRatio(stats(0, 0, 1_000), 100_000)).toBe(1);
+  });
+
+  it('is 0 when the real size is unknown', () => {
+    expect(estimatedReductionRatio(stats(400_000, 0, 10), undefined)).toBe(0);
+    expect(estimatedReductionRatio(stats(400_000, 0, 10), 0)).toBe(0);
   });
 });
 
