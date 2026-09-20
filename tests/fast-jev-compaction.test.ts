@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  emptyAssistantMessages,
   applyDecisions,
   batchCalls,
   batchNotes,
@@ -844,5 +845,41 @@ describe('HTTP client', () => {
     await expect(
       compactMessages(transcript(), { apiKey: '', preserveRecentMessages: 1 }),
     ).rejects.toThrow(/TYPESAFE_API_KEY/);
+  });
+});
+
+describe('empty assistant messages', () => {
+  const thinking = () => message('assistant', '');
+  const messages = (): Message[] => [
+    message('user', 'Fix the failing test.'),
+    thinking(),
+    message('assistant', 'Looking at the test.'),
+    call('tool-1', 'Read', { file_path: 'a.ts' }, 'const a = 1;'),
+    result('tool-1', 'const a = 1;'),
+    thinking(),
+    message('assistant', 'Found it.'),
+    message('user', 'Go on.'),
+    thinking(),
+    message('assistant', 'On it.'),
+  ];
+
+  it('finds thinking-only rows outside the first and the newest messages', () => {
+    const list = messages();
+    const empty = emptyAssistantMessages(list, 2);
+    expect([...empty].map((m) => list.indexOf(m))).toEqual([1, 5]);
+    expect(emptyAssistantMessages([thinking(), thinking()], 0).size).toBe(1);
+  });
+
+  it('removes them on compaction unless told otherwise', async () => {
+    const list = messages();
+    const kept = await compact(list, fakeJev(() => 0.9), { preserveRecentMessages: 2 });
+    expect(kept.stats.emptyDropped).toBe(2);
+    expect(kept.stats.messagesAfter).toBe(list.length - 2);
+    expect(kept.messages.filter((m) => m.role === 'assistant' && m.text === '' && m.toolUses.length === 0)).toHaveLength(1);
+    expect(kept.messages[1]).toBe(list[2]);
+
+    const all = await compact(list, fakeJev(() => 0.9), { preserveRecentMessages: 2, dropEmptyAssistant: false });
+    expect(all.stats.emptyDropped).toBe(0);
+    expect(all.messages).toHaveLength(list.length);
   });
 });

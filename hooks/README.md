@@ -60,6 +60,7 @@ The plugin declares these `userConfig` values in
 | `resultHeadChars` | `200` |
 | `keepCallInputChars` | `600` |
 | `keepCallsRecent` | `60` |
+| `dropThinkingRows` | `true` |
 | `model` | `jev-latest` |
 | `provider` | `typesafe` |
 | `cloudflareAccountId` | — |
@@ -80,15 +81,18 @@ looked up in the process environment first, then in `settings.json` `env`.
 
 Every option except `apiKey`, `compactAtPercent`, `logDecisions`, `minReductionRatio`,
 `model`, `provider`, `cloudflareAccountId`, `cloudflareGatewayId` and
-`baseUrl` is passed straight to the library; see the root README for what
-they do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
+`baseUrl` is passed straight to the library (`dropThinkingRows` as
+`dropEmptyAssistant`); see the root README for what they do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
 the response is malformed, the key is unavailable, the history cannot be
 fitted into the state budget, or the estimated reduction is below
 `minReductionRatio`, the hook logs a fallback and delegates to Claude Code's
 built-in compaction. The outcome is shown as a toast and logged with the
 reduction, per-reason counts, state size and request count; with
 `logDecisions` on, per-call `decisions:` lines with both probabilities are
-logged too (several thousand characters on long sessions). The
+logged too (several thousand characters on long sessions). The reduction in
+that line counts characters the hook can see; at the next request a
+`context 599k -> 210k tokens (...)` line gives the real before and after, read
+from the API's usage. The
 `turn.complete` hook requests
 compaction when `context.percent` reaches `compactAtPercent`, with an
 in-flight guard.

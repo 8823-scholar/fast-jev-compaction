@@ -111,6 +111,7 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     ...numbers,
     compactAtPercent: optionNumber(options, 'compactAtPercent', HOOK_DEFAULTS.compactAtPercent),
     logDecisions: optionBoolean(options, 'logDecisions', HOOK_DEFAULTS.logDecisions),
+    dropEmptyAssistant: optionBoolean(options, 'dropThinkingRows', true),
     minReductionRatio: optionNumber(
       options,
       'minReductionRatio',
@@ -236,6 +237,7 @@ export function summarize(result: CompactResult): string {
     stats.kept > 0 ? `${stats.kept} kept` : '',
     stats.resultsDropped > 0 ? `${stats.resultsDropped} results truncated` : '',
     stats.callsDropped > 0 ? `${stats.callsDropped} call_dropped` : '',
+    stats.emptyDropped > 0 ? `${stats.emptyDropped} thinking rows dropped` : '',
     stats.pinned > 0 ? `${stats.pinned} pinned` : '',
   ].filter(Boolean);
   return `${percent(reductionRatio(result))} reduction; ${
@@ -244,6 +246,21 @@ export function summarize(result: CompactResult): string {
 }
 
 const UI_LOG_MAX_CHARS = 4096;
+
+function thousands(tokens: number): string {
+  return `${Math.round(tokens / 1000)}k`;
+}
+
+/**
+ * The line logged at the first request after a compaction: what the context
+ * really went from and to, against the character-based figure the summary
+ * reported. The two differ by what the transcript never shows (in Claude
+ * Code, thinking blocks and attached context).
+ */
+export function contextLine(before: number, after: number, visibleRatio: number): string {
+  const real = before > 0 ? (before - after) / before : 0;
+  return `context ${thousands(before)} -> ${thousands(after)} tokens (${percent(real)} real reduction; ${percent(visibleRatio)} by visible chars)`;
+}
 
 export function decisionLog(result: CompactResult): string {
   return result.decisions
@@ -352,10 +369,13 @@ function notify(
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
   let compacting = false;
+  // A compaction that stood, awaiting the next request to read its real size.
+  let measure: { before: number; visible: number } | null = null;
 
   on('session.compact', async ($, event, next) => {
     try {
       const config = await resolveCredentials($, configured);
+      const before = (await $.session.usage()).context.tokens;
       const { result, messages } = await compactSession(
         event.messages,
         config,
@@ -377,6 +397,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         $,
         `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})`,
       );
+      if (typeof before === 'number') measure = { before, visible: reductionRatio(result) };
       return { messages };
     } catch (error) {
       notify(
@@ -385,6 +406,17 @@ export const register: Register = (on: On, options: PluginOptions) => {
       );
       return next(event);
     }
+  });
+
+  on('turn.step', async function* ($, event, next) {
+    const result = yield* next(event);
+    if (measure && event.index === 0 && !event.agentId && result.usage) {
+      const { input_tokens, cache_read_input_tokens, cache_creation_input_tokens } = result.usage;
+      const after = input_tokens + cache_read_input_tokens + cache_creation_input_tokens;
+      $.ui.log(contextLine(measure.before, after, measure.visible));
+      measure = null;
+    }
+    return result;
   });
 
   on('turn.complete', async ($, event: TurnCompleteInput, next) => {

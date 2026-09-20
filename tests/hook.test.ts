@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  contextLine,
   compactSession,
   decisionLog,
   decisionLogLines,
@@ -57,6 +58,7 @@ describe('hook config', () => {
     expect(resolveHookConfig({})).toEqual({
       compactAtPercent: 60,
       logDecisions: false,
+      dropEmptyAssistant: true,
       minReductionRatio: 0.25,
       model: 'jev-latest',
       provider: 'typesafe',
@@ -71,6 +73,7 @@ describe('hook config', () => {
       goal: 'g',
       compactAtPercent: 60,
       logDecisions: false,
+      dropEmptyAssistant: true,
       minReductionRatio: 0.25,
       provider: 'typesafe',
     });
@@ -80,6 +83,7 @@ describe('hook config', () => {
     expect(resolveHookConfig({ provider: 'cloudflare', cloudflareAccountId: 'acc', baseUrl: 'https://gw.example/jev' })).toEqual({
       compactAtPercent: 60,
       logDecisions: false,
+      dropEmptyAssistant: true,
       minReductionRatio: 0.25,
       model: 'jev-latest',
       provider: 'cloudflare',
@@ -92,6 +96,21 @@ describe('hook config', () => {
   it('reads logDecisions only as a boolean', () => {
     expect(resolveHookConfig({ logDecisions: true }).logDecisions).toBe(true);
     expect(resolveHookConfig({ logDecisions: 'yes' }).logDecisions).toBe(false);
+  });
+
+  it('maps dropThinkingRows onto the library option, on by default', () => {
+    expect(resolveHookConfig({}).dropEmptyAssistant).toBe(true);
+    expect(resolveHookConfig({ dropThinkingRows: false }).dropEmptyAssistant).toBe(false);
+    expect(resolveHookConfig({ dropThinkingRows: 'no' }).dropEmptyAssistant).toBe(true);
+  });
+});
+
+describe('contextLine', () => {
+  it('reports the real before and after against the visible figure', () => {
+    expect(contextLine(599_421, 538_279, 0.28)).toBe(
+      'context 599k -> 538k tokens (10% real reduction; 28% by visible chars)',
+    );
+    expect(contextLine(0, 0, 0)).toBe('context 0k -> 0k tokens (0% real reduction; 0% by visible chars)');
   });
 });
 

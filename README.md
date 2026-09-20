@@ -168,16 +168,23 @@ const result = await compactMessages(transcript, {
 | `resultHeadChars` | `200` | Characters of each tool output shown to Jev in the state; `0` shows only status and size |
 | `keepCallInputChars` | `600` | Calls with an input up to this size are never removed, only their results; `0` lets Jev decide |
 | `keepCallsRecent` | `60` | How many of the newest calls `keepCallInputChars` protects |
+| `dropEmptyAssistant` | `true` | Remove assistant messages with neither text nor a tool use (Claude Code's thinking-only rows) outside the pinned messages |
 
 `result.stats` reports message and character counts before and after, the
-per-reason decision counts, the state size in estimated tokens, which fitting
-stage was needed, and the number of requests.
+per-reason decision counts, the empty assistant messages removed, the state
+size in estimated tokens, which fitting stage was needed, and the number of
+requests.
 
 ## Limitations
 
 - Only tool calls and results are candidates; text messages are never removed
   or shortened in the output (they are only abridged in the state Jev sees).
-- Token sizes are estimates from character counts, not a tokenizer.
+- Token sizes are estimates from character counts, not a tokenizer, and they
+  only cover what the transcript shows. Claude Code hands the hook neither
+  thinking blocks nor the context it attaches to messages, and restores both
+  with every message kept unchanged; on a long session that unseen part can
+  be most of the window. `dropEmptyAssistant` removes the thinking-only rows,
+  and the plugin logs the real before/after size at the next request.
 - Calibration is at the request level; a probability is not a proof that a
   result is safe to delete. The assistant can always re-run the tool.
 - The full state is repeated with every request, so a history near the state

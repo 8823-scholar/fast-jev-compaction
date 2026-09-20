@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
@@ -96,6 +96,12 @@
       "title": "Newest calls protected",
       "description": "How many of the newest tool calls the rule above protects; older calls follow Jev's answer, so later compactions still have something to cut.",
       "default": 60
+    },
+    "dropThinkingRows": {
+      "type": "boolean",
+      "title": "Drop old thinking rows",
+      "description": "Remove the assistant's thinking-only rows outside the preserved tail. Claude Code hands them to the hook empty but restores each kept one with its encrypted thinking, billed as input, so on long sessions they outgrow everything the compaction can see.",
+      "default": true
     },
     "windowTokens": {
       "type": "number",

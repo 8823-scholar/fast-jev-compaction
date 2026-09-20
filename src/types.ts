@@ -158,6 +158,15 @@ export interface CompactOptions {
    * Default 60.
    */
   keepCallsRecent?: number;
+  /**
+   * Remove assistant messages that carry neither text nor a tool use, outside
+   * the pinned first and newest messages. In Claude Code such a message is a
+   * thinking block the transcript hands over empty; the engine restores the
+   * block, encrypted and billed, with every message kept unchanged, so a long
+   * session keeps hundreds of thousands of tokens of old reasoning that no
+   * decision here can reach. Default true.
+   */
+  dropEmptyAssistant?: boolean;
 }
 
 export interface ResolvedCompactOptions {
@@ -171,6 +180,7 @@ export interface ResolvedCompactOptions {
   resultHeadChars: number;
   keepCallInputChars: number;
   keepCallsRecent: number;
+  dropEmptyAssistant: boolean;
 }
 
 export interface CompactResult {
@@ -187,6 +197,8 @@ export interface CompactResult {
     resultsDropped: number;
     callsDropped: number;
     pinned: number;
+    /** Empty assistant messages (thinking-only rows) removed. */
+    emptyDropped: number;
     stateTokens: number;
     /** Which fitting stage the state needed (`windowed xN` when split), '' when no request was made. */
     stateStage: string;

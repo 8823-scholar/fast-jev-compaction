@@ -34,6 +34,7 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   resultHeadChars: 200,
   keepCallInputChars: 600,
   keepCallsRecent: 60,
+  dropEmptyAssistant: true,
 };
 
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
@@ -87,6 +88,7 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
       0,
       Math.floor(finite(options.keepCallsRecent, DEFAULT_OPTIONS.keepCallsRecent)),
     ),
+    dropEmptyAssistant: options.dropEmptyAssistant ?? DEFAULT_OPTIONS.dropEmptyAssistant,
   };
 }
 
@@ -343,6 +345,33 @@ export function messageChars(message: Message): number {
   return total;
 }
 
+/**
+ * Assistant messages with neither text nor a tool use, outside the pinned
+ * first and newest messages. Nothing visible is lost by removing them; what
+ * goes is whatever the host attached to the message and hands over empty
+ * (in Claude Code, a thinking block).
+ */
+export function emptyAssistantMessages(
+  messages: readonly Message[],
+  preserveRecentMessages: number,
+): Set<Message> {
+  const tailStart = Math.max(1, messages.length - preserveRecentMessages);
+  const empty = new Set<Message>();
+  messages.forEach((message, index) => {
+    if (
+      index >= 1 &&
+      index < tailStart &&
+      message.role === 'assistant' &&
+      message.text.length === 0 &&
+      message.toolUses.length === 0 &&
+      (message.toolResults ?? []).length === 0
+    ) {
+      empty.add(message);
+    }
+  });
+  return empty;
+}
+
 export function reductionRatio(result: Pick<CompactResult, 'stats'>): number {
   const { charsBefore, charsAfter } = result.stats;
   return charsBefore === 0 ? 0 : (charsBefore - charsAfter) / charsBefore;
@@ -425,12 +454,15 @@ export async function compact(
       keepCallInputChars: recent.has(call.id) ? resolved.keepCallInputChars : 0,
     }),
   );
+  const empty = resolved.dropEmptyAssistant
+    ? emptyAssistantMessages(messages, resolved.preserveRecentMessages)
+    : new Set<Message>();
   const kept = applyDecisions(
     messages,
     decisions,
     calls,
     resolved.truncateHeadChars,
-  );
+  ).filter((message) => !empty.has(message));
   return {
     messages: kept,
     decisions,
@@ -444,6 +476,7 @@ export async function compact(
       resultsDropped: count(decisions, 'result_dropped'),
       callsDropped: count(decisions, 'call_dropped'),
       pinned: count(decisions, 'pinned'),
+      emptyDropped: empty.size,
       stateTokens: fitted.tokens,
       stateStage: fitted.stage,
       requests,
